@@ -22,7 +22,7 @@ Contents:
 
 ### The configuration (your own orchestrator)
 Run the build through your claude-template orchestrator, not ultracode's automatic fan-out. The reasoning: ultracode forces an all-or-nothing worker model (all Opus, which is limit-risky over hours, or all Sonnet via the global env var, which also forces the reviewer to Sonnet and thins the verifier). Your orchestrator is the only setup that runs code generation cheaply on Sonnet while keeping the reviewer on Opus, which is the right division of labor for a correctness-critical, multi-hour run.
-- **Orchestrator (the planning and routing loop):** Opus 4.8 at xhigh effort, using max only for the hardest planning passes. It holds the architecture, plans the work, and delegates per role.
+- **Orchestrator (the planning and routing loop):** Opus 4.8 at max effort. It holds the architecture, plans the work, and delegates per role.
 - **Code generation workers:** Sonnet 4.6 subagents (effort omitted, so high, which is Sonnet's effective top tier for coding). This keeps the bulk token volume off Opus and protects your usage limits.
 - **Code reviewer and verifier:** an Opus 4.8 subagent at effort max with read-only tools. Keeping the critic on the strong model is what preserves the verification quality that long autonomous runs depend on.
 - **Do not set CLAUDE_CODE_SUBAGENT_MODEL.** It sits at the top of the model-resolution order and would override the per-role frontmatter, forcing every subagent (reviewer included) to one model. The global env var and the per-role split are mutually exclusive; here you want the per-role frontmatter.
@@ -53,7 +53,7 @@ Per phase: kick off the orchestrator, have it restate the phase and write the fi
 
 ### Set it deterministically (do not rely on the UI toggle)
 For an unattended run:
-- Launch the orchestrator on Opus 4.8 explicitly (on Team Standard the Default is Sonnet, so do not trust Default): claude --model opus, at xhigh effort.
+- Launch the orchestrator on Opus 4.8 explicitly (on Team Standard the Default is Sonnet, so do not trust Default): claude --model opus, then set effort to max with /effort (a session setting, not the env var).
 - Leave both CLAUDE_CODE_SUBAGENT_MODEL and CLAUDE_CODE_EFFORT_LEVEL unset, so per-subagent frontmatter model and effort are honored. The effort env var would override frontmatter effort, including the reviewer's max.
 - Put all house rules and skill-trigger cues in CLAUDE.md (Section J) so every subagent inherits them.
 - Optionally add the keyword ultrathink in the kickoff message to deepen the first planning turn.
@@ -106,7 +106,7 @@ Hard rule: assets and art carry no game logic. Renderers are pure views over the
 
 ## Section D. The master kickoff prompt
 
-Save this document in the repo as docs/BUILD_PLAN.md so the orchestrator and its subagents can read it. Then start your claude-template orchestrator on Opus 4.8 at xhigh, with code-generator subagents on Sonnet and the code-reviewer subagent on Opus at max effort, and CLAUDE_CODE_SUBAGENT_MODEL left unset (see Section A). Paste the block below.
+Save this document in the repo as docs/BUILD_PLAN.md so the orchestrator and its subagents can read it. Then start your claude-template orchestrator on Opus 4.8 at max effort, with code-generator subagents on Sonnet and the code-reviewer subagent on Opus at max effort, and CLAUDE_CODE_SUBAGENT_MODEL left unset (see Section A). Paste the block below.
 
 ```
 ultrathink
