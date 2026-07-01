@@ -12,9 +12,18 @@ A one-shot run should cover exactly what a single session can build **and object
 
 ## How to launch
 
-- Start the session on the strongest model at maximum effort: `claude --model opus`, then `/effort max`. (On Team Standard the default model is Sonnet; do not trust Default.)
-- Leave `CLAUDE_CODE_SUBAGENT_MODEL` and `CLAUDE_CODE_EFFORT_LEVEL` unset so the per-role subagent split in `CLAUDE.md` holds (Sonnet generation, Opus review).
+- Start the session on the strongest model available, at maximum effort. Preferred: Fable 5 (`claude --model claude-fable-5`, then `/effort max`). Fallback: Opus 4.8 (`claude --model opus`, then `/effort max`). Do not trust the Default model setting; on Team Standard it resolves to Sonnet.
+- Leave `CLAUDE_CODE_SUBAGENT_MODEL` and `CLAUDE_CODE_EFFORT_LEVEL` unset so per-subagent frontmatter (Sonnet generation, Opus review) is honored for delegated work.
+- Run the prompt **solo** — no ultracode, no orchestrator teams. A gated orchestrator (the /tm- pipeline from Build Plan Section A) is the right tool for the supervised multi-phase build, but its human gates and issue-slicing are exactly what a one-shot removes; stacking it under this prompt reintroduces them, and its planning stage is redundant because the plan is already `BUILD_PLAN.md`. Ultracode's automatic fan-out suits sweeps (audits, bug hunts, migrations), not a green-field core whose determinism contract must be held in one head — save it for a post-build determinism audit as an independent Gate 0/1 check.
 - Paste the prompt below as the first and only message. Intervene only if the run stops and asks.
+
+### Delegation under a Fable driver
+
+CLAUDE.md's Sonnet-generation / Opus-review split was designed with Opus as the top model. With Fable 5 driving, apply it like this (the prompt encodes the same rule):
+
+- The driver writes the correctness-critical code itself: everything under sim/, the content schemas, the hashing, and the tests that gate the run. Delegating those to Sonnet gives away the reason to run Fable.
+- Sonnet code-generation subagents take the mechanical bulk: web scaffolding, builder UI, configs, CI plumbing.
+- The reviewer stays Opus at max effort. It is now a weaker critic than the author, which is acceptable: it still provides an independent second perspective, and the run's real gates are the golden-replay and parity tests, which are objective ground truth regardless of who reviews.
 
 ## The prompt
 
@@ -39,6 +48,7 @@ PRE-MADE DECISIONS (do not re-litigate, do not ask)
 - Arena: integer grid, 200 x 120. Positions, ranges, and speeds are integers; range checks compare squared distances.
 - Ruleset version: "0.1.0", a constant in core, included in every MatchResult and in the replay tuple.
 - Content v0: 4 Roles (Bulwark: tanky frontline; Lens: ranged controller; Sever: burst melee; Mender: healer), 7 Skills wired to those roles, 3 Behaviors (aggro-lowest-hp, protect-allies, focus-casters). Two sample warbands in builds/warband-a.json and builds/warband-b.json.
+- Delegation: write sim/, the content layer, the hashing, and the gating tests yourself in this session — they carry the determinism contract and stay in one head. Delegate only mechanical bulk (web scaffolding, UI boilerplate, config, CI plumbing) to Sonnet code-generation subagents; that delegated bulk is what CLAUDE.md's "code generation runs on Sonnet subagents" applies to in this run. Every change, delegated or not, still passes the Opus code-reviewer.
 
 DETERMINISM TRAPS — get these right the first time, they are where golden-replay tests die:
 1. RNG draw order is part of the spec. Process units in ascending unit id every tick; every RNG draw happens inside that iteration order. Never draw from the RNG in a callback, a sort comparator, or event emission.
@@ -85,5 +95,6 @@ STOP AND ASK only if a decision would change the determinism contract, the parit
 | One implementation of shared logic | stableStringify/hashEventLog are exported from core and mandated everywhere, so parity can't fail from duplicate hashing code |
 | No test-gaming escape hatch | "fix the surface, never the test" and "never weaken a test to get to green" close the two ways agents fake green |
 | Plan before code | Step 0 forces a file tree and enforcement map before the first commit |
+| The strongest model does the risky work | The delegation decision keeps sim/, hashing, and the gating tests with the driver; Sonnet subagents get only mechanical bulk |
 | Context survives | The contract is restated inline, so it holds even if spec reading is shallow; BUILD_PLAN.md sections are still mandated reading |
 | Scope can't creep | Phases 2-4 declared out of scope twice (mission and finish), with an explicit "do not begin Phase 2" |
