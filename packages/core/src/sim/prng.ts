@@ -5,7 +5,7 @@ export type Rng = {
 
 /**
  * The one seeded PRNG permitted under sim/ (bryc's mulberry32). See the
- * determinism contract in CLAUDE.md: no Math.random anywhere in the sim tree.
+ * determinism contract in CLAUDE.md: sim/ has no other source of randomness.
  */
 export function mulberry32(seed: number): Rng {
   let a = seed;
