@@ -6,7 +6,19 @@ Warwright is original IP. It borrows the architecture of World of Claudecraft (o
 
 ## Status
 
-Repository scaffolding only. No engine code yet. The build runs in five gated phases (see below); each phase is kicked off and approved separately.
+The pnpm workspace and shared tooling are scaffolded. No engine code yet. The build runs in five gated phases (see below); each phase is kicked off and approved separately.
+
+## Development
+
+Prerequisites: Node 20 (see [`.nvmrc`](.nvmrc)) and [pnpm](https://pnpm.io).
+
+```bash
+pnpm install
+pnpm -r typecheck
+pnpm -r lint
+pnpm -r test
+pnpm --filter @warwright/core build
+```
 
 ## Build plan
 
