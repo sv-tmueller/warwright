@@ -1,0 +1,13 @@
+{
+  "name": "@warwright/cli",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run --config ../../vitest.config.ts"
+  },
+  "dependencies": {
+    "@warwright/core": "workspace:*"
+  }
+}
