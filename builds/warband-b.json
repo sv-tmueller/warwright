@@ -1,0 +1,29 @@
+{
+  "name": "Crimson Horde",
+  "units": [
+    {
+      "roleId": "vanguard",
+      "skillIds": ["guardian-ward", "shield-bash"],
+      "behaviorId": "protect-allies",
+      "position": { "x": 900, "y": 600 }
+    },
+    {
+      "roleId": "reaver",
+      "skillIds": ["cleave"],
+      "behaviorId": "aggro-lowest-hp",
+      "position": { "x": 850, "y": 500 }
+    },
+    {
+      "roleId": "warden",
+      "skillIds": ["frost-bolt", "venom-shot"],
+      "behaviorId": "focus-casters",
+      "position": { "x": 950, "y": 550 }
+    },
+    {
+      "roleId": "mender",
+      "skillIds": ["mending-touch"],
+      "behaviorId": "protect-allies",
+      "position": { "x": 970, "y": 600 }
+    }
+  ]
+}

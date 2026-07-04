@@ -1,0 +1,29 @@
+{
+  "name": "Iron Vanguard",
+  "units": [
+    {
+      "roleId": "vanguard",
+      "skillIds": ["guardian-ward", "shield-bash"],
+      "behaviorId": "protect-allies",
+      "position": { "x": 100, "y": 400 }
+    },
+    {
+      "roleId": "reaver",
+      "skillIds": ["cleave"],
+      "behaviorId": "aggro-lowest-hp",
+      "position": { "x": 150, "y": 500 }
+    },
+    {
+      "roleId": "warden",
+      "skillIds": ["frost-bolt", "venom-shot"],
+      "behaviorId": "focus-casters",
+      "position": { "x": 50, "y": 450 }
+    },
+    {
+      "roleId": "mender",
+      "skillIds": ["mending-touch"],
+      "behaviorId": "protect-allies",
+      "position": { "x": 30, "y": 400 }
+    }
+  ]
+}
