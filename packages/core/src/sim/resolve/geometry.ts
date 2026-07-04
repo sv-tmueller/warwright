@@ -52,7 +52,9 @@ export function nearestBySquaredDistance(from: Position, candidates: readonly Po
   let bestD2 = Infinity;
 
   for (let i = 0; i < candidates.length; i += 1) {
-    const d2 = squaredDistance(from, candidates[i]);
+    const candidate = candidates[i];
+    if (candidate === undefined) continue;
+    const d2 = squaredDistance(from, candidate);
     if (d2 < bestD2) {
       bestD2 = d2;
       bestIndex = i;
