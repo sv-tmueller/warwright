@@ -9,5 +9,8 @@
   },
   "dependencies": {
     "@warwright/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.0"
   }
 }
