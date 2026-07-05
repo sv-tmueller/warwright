@@ -20,6 +20,16 @@ pnpm -r test
 pnpm --filter @warwright/core build
 ```
 
+## Usage
+
+Run a match from the command line with the `sim:run` script:
+
+```bash
+pnpm sim:run --seed 42 --a builds/warband-a.json --b builds/warband-b.json
+```
+
+It loads the two warband JSON files, runs the deterministic core, and prints a tick-by-tick event log followed by the winner. Output derives only from the event log, so the same seed and builds produce byte-identical stdout on every run and machine.
+
 ## Build plan
 
 The complete specification lives in [`docs/BUILD_PLAN.md`](docs/BUILD_PLAN.md). The cross-phase house rules (the determinism contract, cross-surface parity, layout, art and content conventions) live in [`CLAUDE.md`](CLAUDE.md) and are inherited by every session and subagent.
