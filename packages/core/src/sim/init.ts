@@ -1,9 +1,7 @@
 import { parseWarband } from '../content/schemas.js';
 import type { UnitBuild } from '../content/schemas.js';
 import { createContentRegistry } from '../content/registry.js';
-import { roles } from '../content/data/roles.js';
-import { skills } from '../content/data/skills.js';
-import { aggroLowestHp, protectAllies, focusCasters } from '../content/behaviors/index.js';
+import { createSeedRegistry } from './seed-registry.js';
 import { mulberry32 } from './prng.js';
 import { emit } from './events.js';
 import type { SpawnInfo } from './events.js';
@@ -47,12 +45,7 @@ export function init(version: number, seed: number, buildA: unknown, buildB: unk
   const parsedA = parseWarband(buildA);
   const parsedB = parseWarband(buildB);
 
-  const registry = createContentRegistry();
-  for (const role of roles) registry.loadRole(role);
-  for (const skill of skills) registry.loadSkill(skill);
-  registry.registerBehavior(aggroLowestHp);
-  registry.registerBehavior(protectAllies);
-  registry.registerBehavior(focusCasters);
+  const registry = createSeedRegistry();
 
   let nextId = 0;
   const units: Unit[] = [];

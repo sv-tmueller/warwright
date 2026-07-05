@@ -13,3 +13,7 @@ export const ARENA_MIN_X = 0;
 export const ARENA_MIN_Y = 0;
 export const ARENA_MAX_X = 1000;
 export const ARENA_MAX_Y = 1000;
+
+// 5 minutes at 20 Hz. Bounds a non-terminating match with a `'draw'`; not
+// correctness-critical.
+export const MATCH_TICK_CAP = 6000;
