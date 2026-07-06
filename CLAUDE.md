@@ -41,3 +41,21 @@ An autobattler. Units are configured (Role, Skills, Behavior) and fight autonomo
 - TypeScript strict. Validate all external data with Zod and fail loud.
 - Small, pure functions in resolve/. CLI and renderer output derives only from the event log.
 - Commit in logical chunks. Run typecheck, lint, and test before declaring work done.
+
+## Useful commands
+All commands run from the repo root.
+
+```bash
+# install workspace dependencies
+pnpm install
+# type-check every package
+pnpm typecheck
+# lint every package
+pnpm lint
+# run the test suites
+pnpm test
+# flagship demo: run a full match and print the event log and winner
+pnpm sim:run --seed 42 --a builds/warband-a.json --b builds/warband-b.json
+# regenerate the golden-replay snapshot; see the ruleset-version rule in the determinism contract section above
+pnpm --filter @warwright/core gen-golden
+```
