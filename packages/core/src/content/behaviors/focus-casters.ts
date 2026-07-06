@@ -1,6 +1,6 @@
 import type { Action, Behavior, UnitView, WorldView } from '../../sim/behavior.js';
 import type { Rng } from '../../sim/prng.js';
-import { squaredDistance } from '../../sim/resolve/geometry.js';
+import { isInRange, squaredDistance } from '../../sim/resolve/geometry.js';
 import { pickBest } from './select.js';
 
 function decide(self: UnitView, world: WorldView, rng: Rng): Action {
@@ -13,7 +13,10 @@ function decide(self: UnitView, world: WorldView, rng: Rng): Action {
     (a, b) => squaredDistance(self.pos, a.pos) < squaredDistance(self.pos, b.pos),
     rng,
   );
-  return target ? { kind: 'attack', targetId: target.id } : { kind: 'idle' };
+  if (!target) return { kind: 'idle' };
+  return isInRange(self.pos, target.pos, self.attackRangeSquared)
+    ? { kind: 'attack', targetId: target.id }
+    : { kind: 'move-toward', targetId: target.id };
 }
 
 export const focusCasters: Behavior = {

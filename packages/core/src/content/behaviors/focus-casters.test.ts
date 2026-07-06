@@ -12,6 +12,7 @@ function unit(id: number, x: number, skillIds: readonly string[]): UnitView {
     maxHp: 100,
     pos: { x, y: 0 },
     skills: skillIds.map((skillId) => ({ skillId, cooldownRemaining: 0 })),
+    attackRangeSquared: 10000,
   };
 }
 
@@ -91,6 +92,24 @@ describe('focusCasters', () => {
   it('idles when there are no enemies', () => {
     const world: WorldView = { alliesOf: throwingAllies(), enemiesOf: () => [] };
     expect(focusCasters.decide(self, world, throwingRng())).toEqual({ kind: 'idle' });
+  });
+
+  it('moves toward the selected target when it is out of attack range', () => {
+    const farCaster = unit(2, 200, ['fireball']);
+    const world: WorldView = { alliesOf: throwingAllies(), enemiesOf: () => [farCaster] };
+    expect(focusCasters.decide(self, world, throwingRng())).toEqual({
+      kind: 'move-toward',
+      targetId: 2,
+    });
+  });
+
+  it('attacks the selected target when it is in attack range', () => {
+    const near = unit(2, 10, []);
+    const world: WorldView = { alliesOf: throwingAllies(), enemiesOf: () => [near] };
+    expect(focusCasters.decide(self, world, throwingRng())).toEqual({
+      kind: 'attack',
+      targetId: 2,
+    });
   });
 
   it('is deterministic: identical inputs yield identical actions', () => {

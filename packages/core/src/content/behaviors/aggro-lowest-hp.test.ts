@@ -3,15 +3,16 @@ import type { Rng } from '../../sim/prng.js';
 import type { UnitView, WorldView } from '../../sim/behavior.js';
 import { aggroLowestHp } from './aggro-lowest-hp.js';
 
-function unit(id: number, hp: number): UnitView {
+function unit(id: number, hp: number, pos: { x: number; y: number } = { x: 0, y: 0 }): UnitView {
   return {
     id,
     team: 'A',
     roleId: 'warrior',
     hp,
     maxHp: 100,
-    pos: { x: 0, y: 0 },
+    pos,
     skills: [],
+    attackRangeSquared: 400,
   };
 }
 
@@ -79,6 +80,24 @@ describe('aggroLowestHp', () => {
   it('idles when there are no enemies', () => {
     const world: WorldView = { alliesOf: throwingAllies(), enemiesOf: () => [] };
     expect(aggroLowestHp.decide(self, world, throwingRng())).toEqual({ kind: 'idle' });
+  });
+
+  it('moves toward the selected target when it is out of attack range', () => {
+    const enemies = [unit(2, 10, { x: 100, y: 0 })];
+    const world: WorldView = { alliesOf: throwingAllies(), enemiesOf: () => enemies };
+    expect(aggroLowestHp.decide(self, world, throwingRng())).toEqual({
+      kind: 'move-toward',
+      targetId: 2,
+    });
+  });
+
+  it('attacks the selected target when it is in attack range', () => {
+    const enemies = [unit(2, 10, { x: 0, y: 0 })];
+    const world: WorldView = { alliesOf: throwingAllies(), enemiesOf: () => enemies };
+    expect(aggroLowestHp.decide(self, world, throwingRng())).toEqual({
+      kind: 'attack',
+      targetId: 2,
+    });
   });
 
   it('is deterministic: identical inputs yield identical actions', () => {

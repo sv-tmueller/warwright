@@ -17,6 +17,7 @@ export type UnitView = {
   readonly maxHp: number;
   readonly pos: Readonly<Position>;
   readonly skills: readonly SkillView[];
+  readonly attackRangeSquared: number;
 };
 
 // Team-relative, read-only queries. Both return LIVING units (hp > 0) in
