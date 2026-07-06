@@ -20,9 +20,9 @@
       "position": { "x": 950, "y": 550 }
     },
     {
-      "roleId": "mender",
-      "skillIds": ["mending-touch"],
-      "behaviorId": "protect-allies",
+      "roleId": "reaver",
+      "skillIds": ["cleave"],
+      "behaviorId": "aggro-lowest-hp",
       "position": { "x": 970, "y": 600 }
     }
   ]
