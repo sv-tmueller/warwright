@@ -1,6 +1,7 @@
 import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 import eslintConfigPrettier from 'eslint-config-prettier';
+import reactHooks from 'eslint-plugin-react-hooks';
 
 // sim/ determinism enforcement. Keep this token list in sync with the
 // forbidden-token regexes in packages/core/src/determinism-scan.test.ts:
@@ -112,6 +113,25 @@ export default tseslint.config(
             name,
             message: 'sim/ imports nothing from Node.',
           })),
+        },
+      ],
+    },
+  },
+  {
+    files: ['packages/web/src/**/*.{ts,tsx}'],
+    plugins: reactHooks.configs.flat.recommended.plugins,
+    rules: {
+      ...reactHooks.configs.flat.recommended.rules,
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['@warwright/core/*', '**/core/src/**'],
+              message:
+                'packages/web only consumes core through its public API (bare @warwright/core); it never imports sim internals directly.',
+            },
+          ],
         },
       ],
     },
