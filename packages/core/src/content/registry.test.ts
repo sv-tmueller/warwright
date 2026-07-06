@@ -41,6 +41,7 @@ function makeUnitView(id: number): UnitView {
     maxHp: 100,
     pos: { x: 0, y: 0 },
     skills: [],
+    attackRangeSquared: 400,
   };
 }
 

@@ -20,6 +20,7 @@ function toUnitView(unit: Unit): UnitView {
       skillId: skill.skillId,
       cooldownRemaining: skill.cooldownRemaining,
     })),
+    attackRangeSquared: unit.attackRangeSquared,
   };
 }
 
