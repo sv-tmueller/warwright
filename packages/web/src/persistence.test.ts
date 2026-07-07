@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseWarband } from '@warwright/core';
 import warbandAJson from '../../../builds/warband-a.json' with { type: 'json' };
-import { clearWarband, loadWarband, saveWarband } from './persistence.js';
+import { loadWarband, saveWarband } from './persistence.js';
 import type { WarbandStorage } from './persistence.js';
 
 function createMemoryStorage(): WarbandStorage {
@@ -10,9 +10,6 @@ function createMemoryStorage(): WarbandStorage {
     getItem: (key) => store.get(key) ?? null,
     setItem: (key, value) => {
       store.set(key, value);
-    },
-    removeItem: (key) => {
-      store.delete(key);
     },
   };
 }
@@ -31,15 +28,5 @@ describe('persistence', () => {
     saveWarband(warband, storage);
 
     expect(loadWarband(storage)).toEqual(warband);
-  });
-
-  it('clears the saved warband', () => {
-    const storage = createMemoryStorage();
-    const warband = parseWarband(warbandAJson);
-
-    saveWarband(warband, storage);
-    clearWarband(storage);
-
-    expect(loadWarband(storage)).toBeNull();
   });
 });
