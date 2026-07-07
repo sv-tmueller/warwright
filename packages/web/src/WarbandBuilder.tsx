@@ -82,6 +82,9 @@ export function WarbandBuilder() {
   }
 
   function handleSave(): void {
+    if (!validation.ok) {
+      return;
+    }
     saveWarband(warband);
   }
 
@@ -205,7 +208,7 @@ export function WarbandBuilder() {
       {!validation.ok && <p role="alert">{validation.error}</p>}
       {importError !== null && <p role="alert">{importError}</p>}
 
-      <button type="button" onClick={handleSave}>
+      <button type="button" onClick={handleSave} disabled={!validation.ok}>
         Save to browser
       </button>
       <button type="button" onClick={handleExport} disabled={!validation.ok}>
