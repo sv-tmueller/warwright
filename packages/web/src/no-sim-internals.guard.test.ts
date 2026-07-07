@@ -44,4 +44,35 @@ describe('no-sim-internals guard', () => {
     const ruleIds = result.messages.map((message) => message.ruleId);
     expect(ruleIds).not.toContain('no-restricted-imports');
   });
+
+  it('reports no-restricted-imports for a relative escape into core internals', async () => {
+    // '@warwright/core/*' cannot match this: it starts with '../../', not the
+    // package name. Only '**/core/src/**' catches it, so this uniquely pins
+    // the relative-escape pattern, the shape core's exports map cannot block.
+    const result = await lint(
+      "import { runTick } from '../../core/src/sim/loop.js';\n",
+    );
+
+    const ruleIds = result.messages.map((message) => message.ruleId);
+    expect(ruleIds).toContain('no-restricted-imports');
+  });
+
+  it('reports no-restricted-imports for a single-segment subpath of core', async () => {
+    // '**/core/src/**' cannot match this: the path has 'core/api', not
+    // 'core/src/'. Only '@warwright/core/*' catches it, so this uniquely
+    // pins the package-subpath pattern.
+    const result = await lint("import { something } from '@warwright/core/api';\n");
+
+    const ruleIds = result.messages.map((message) => message.ruleId);
+    expect(ruleIds).toContain('no-restricted-imports');
+  });
+
+  it('reports react-hooks/rules-of-hooks for a hook called conditionally', async () => {
+    const result = await lint(
+      "import { useState } from 'react';\n\nfunction useConditionalState(flag) {\n  if (flag) {\n    useState(0);\n  }\n}\n",
+    );
+
+    const ruleIds = result.messages.map((message) => message.ruleId);
+    expect(ruleIds).toContain('react-hooks/rules-of-hooks');
+  });
 });
