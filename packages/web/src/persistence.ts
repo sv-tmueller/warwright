@@ -1,7 +1,7 @@
 import type { Warband } from '@warwright/core';
 import { deserializeWarband, serializeWarband } from './warband-io.js';
 
-export type WarbandStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
+export type WarbandStorage = Pick<Storage, 'getItem' | 'setItem'>;
 
 const STORAGE_KEY = 'warwright:warband-builder:draft';
 
@@ -17,8 +17,4 @@ export function loadWarband(storage: WarbandStorage = localStorage): Warband | n
     return null;
   }
   return deserializeWarband(raw);
-}
-
-export function clearWarband(storage: WarbandStorage = localStorage): void {
-  storage.removeItem(STORAGE_KEY);
 }

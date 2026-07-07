@@ -26,6 +26,8 @@ const HAND_BUILT_LOG: MatchEvent[] = [
   { kind: 'damage', tick: 2, sourceId: 0, targetId: 1, amount: 20, absorbed: 0, hpAfter: 60 },
   { kind: 'status-applied', tick: 2, targetId: 1, status: 'slow', magnitude: 30, durationTicks: 3 },
   { kind: 'tick', tick: 2 },
+  { kind: 'heal', tick: 3, sourceId: 1, targetId: 1, amount: 20, hpAfter: 80 },
+  { kind: 'cast', tick: 3, unitId: 0, skillId: 'fireball', targetId: 1 },
   { kind: 'tick', tick: 3 },
   { kind: 'tick', tick: 4 },
   { kind: 'status-expired', tick: 5, targetId: 1, status: 'slow' },
@@ -85,6 +87,22 @@ describe('deriveFrame: per-event cases (hand-built log)', () => {
   it('tickEffects only ever contains events from exactly tick N, not earlier ticks', () => {
     const frame = deriveFrame(HAND_BUILT_LOG, 4);
     expect(frame.tickEffects).toEqual([]);
+  });
+
+  it('heal sets the target hp to hpAfter', () => {
+    const frame = deriveFrame(HAND_BUILT_LOG, 3);
+    expect(unitById(frame, 1).hp).toBe(80);
+  });
+
+  it('cast appears in tickEffects at its tick', () => {
+    const frame = deriveFrame(HAND_BUILT_LOG, 3);
+    expect(frame.tickEffects).toContainEqual({
+      kind: 'cast',
+      tick: 3,
+      unitId: 0,
+      skillId: 'fireball',
+      targetId: 1,
+    });
   });
 
   it('status-applied sets a status entry keyed by status kind', () => {
