@@ -1,6 +1,6 @@
 import type { DrawContext } from './art/context.js';
-import { drawBar, drawRoleSilhouette, drawStatusIndicator } from './art/index.js';
-import type { FrameState, FrameUnit, Position } from './frame-state.js';
+import { drawBar, drawRoleSilhouette, drawSkillIcon, drawStatusIndicator } from './art/index.js';
+import type { FrameState, FrameUnit, Position, TickEffect } from './frame-state.js';
 
 /**
  * Explicit world->canvas transform, supplied by the caller. Arena bounds
@@ -27,18 +27,24 @@ const HP_BAR_FILL_COLOR = '#2ecc71';
 const STATUS_INDICATOR_RADIUS = 5;
 const STATUS_INDICATOR_SPACING = 14;
 const STATUS_INDICATOR_OFFSET_Y = 32;
+const CAST_ICON_SIZE = 10;
+const CAST_ICON_OFFSET_Y = -44;
+const ATTACK_FLASH_COLOR = '#ffcc00';
+const ATTACK_FLASH_WIDTH = 2;
+const DAMAGE_MARKER_RADIUS = 10;
+const DAMAGE_MARKER_COLOR = '#ff3b30';
+const DAMAGE_MARKER_WIDTH = 2;
 
 /**
  * Draws a FrameState onto a DrawContext: a background fill, then for each
  * living unit (walked in ascending id order, mirroring the determinism
  * contract's processing order) a role silhouette, an hp bar, and one status
- * indicator per active status. Pure: no state, no randomness, no import
- * from @warwright/core.
- *
- * `tickEffects` is not drawn here. The sub-plan's own verification step
- * only requires a silhouette + hp bar + status indicators, and decision 3
- * defers ability/cast visuals (drawSkillIcon) to a later issue; the data
- * stays on FrameState for that follow-up to consume.
+ * indicator per active status, and finally `tickEffects` (attack/cast/damage
+ * events at exactly this tick) as transient overlays, in log order: casts via
+ * `drawSkillIcon` near the caster, attack/damage via inline `DrawContext`
+ * primitives (a line flash and a ring marker respectively - see the sub-plan
+ * on issue #77 for why these two stay inline instead of joining the art
+ * module). Pure: no state, no randomness, no import from @warwright/core.
  */
 export function drawFrame(ctx: DrawContext, frame: FrameState, transform: Transform): void {
   ctx.save();
@@ -50,6 +56,8 @@ export function drawFrame(ctx: DrawContext, frame: FrameState, transform: Transf
   for (const unit of livingUnits) {
     drawUnit(ctx, unit, transform);
   }
+
+  drawTickEffects(ctx, frame, transform);
 }
 
 function drawUnit(ctx: DrawContext, unit: FrameUnit, transform: Transform): void {
@@ -77,4 +85,66 @@ function drawUnit(ctx: DrawContext, unit: FrameUnit, transform: Transform): void
       size: STATUS_INDICATOR_RADIUS,
     });
   });
+}
+
+// Looked up by id regardless of `dead`: a unit can die on the same tick as
+// the attack/damage event that killed it, and the overlay still needs a
+// position for that unit.
+function drawTickEffects(ctx: DrawContext, frame: FrameState, transform: Transform): void {
+  const unitsById = new Map(frame.units.map((unit) => [unit.id, unit]));
+
+  for (const effect of frame.tickEffects) {
+    drawTickEffect(ctx, effect, unitsById, transform);
+  }
+}
+
+function drawTickEffect(
+  ctx: DrawContext,
+  effect: TickEffect,
+  unitsById: ReadonlyMap<number, FrameUnit>,
+  transform: Transform,
+): void {
+  switch (effect.kind) {
+    case 'cast': {
+      const caster = unitsById.get(effect.unitId);
+      if (!caster) return;
+      const { x, y } = transform.toCanvas(caster.pos);
+      drawSkillIcon(ctx, {
+        skillId: effect.skillId,
+        x,
+        y: y + CAST_ICON_OFFSET_Y,
+        size: CAST_ICON_SIZE,
+      });
+      return;
+    }
+    case 'attack': {
+      const attacker = unitsById.get(effect.unitId);
+      const target = unitsById.get(effect.targetId);
+      if (!attacker || !target) return;
+      const from = transform.toCanvas(attacker.pos);
+      const to = transform.toCanvas(target.pos);
+      ctx.save();
+      ctx.strokeStyle = ATTACK_FLASH_COLOR;
+      ctx.lineWidth = ATTACK_FLASH_WIDTH;
+      ctx.beginPath();
+      ctx.moveTo(from.x, from.y);
+      ctx.lineTo(to.x, to.y);
+      ctx.stroke();
+      ctx.restore();
+      return;
+    }
+    case 'damage': {
+      const target = unitsById.get(effect.targetId);
+      if (!target) return;
+      const { x, y } = transform.toCanvas(target.pos);
+      ctx.save();
+      ctx.strokeStyle = DAMAGE_MARKER_COLOR;
+      ctx.lineWidth = DAMAGE_MARKER_WIDTH;
+      ctx.beginPath();
+      ctx.arc(x, y, DAMAGE_MARKER_RADIUS, 0, Math.PI * 2, false);
+      ctx.stroke();
+      ctx.restore();
+      return;
+    }
+  }
 }

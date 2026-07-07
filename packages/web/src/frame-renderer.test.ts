@@ -151,3 +151,96 @@ describe('drawFrame', () => {
     expect(firstFillRect).toMatchObject({ args: [0, 0, TRANSFORM.width, TRANSFORM.height] });
   });
 });
+
+function callCount(commands: readonly unknown[], method: string): number {
+  return commands.filter(
+    (command) =>
+      typeof command === 'object' &&
+      command !== null &&
+      'kind' in command &&
+      command.kind === 'call' &&
+      'method' in command &&
+      command.method === method,
+  ).length;
+}
+
+describe('drawFrame: tickEffects overlays', () => {
+  it('draws a cast overlay via drawSkillIcon (a fill call) near the caster', () => {
+    const units = [makeUnit({ id: 0 }), makeUnit({ id: 1 })];
+    const withoutCast = makeFrame({ units });
+    const withCast = makeFrame({
+      units,
+      tickEffects: [{ kind: 'cast', tick: 0, unitId: 0, skillId: 'frost-bolt', targetId: 1 }],
+    });
+
+    expect(callCount(drawAndRecord(withCast), 'fill')).toBe(
+      callCount(drawAndRecord(withoutCast), 'fill') + 1,
+    );
+  });
+
+  it('cast overlays are deterministic and vary with skillId', () => {
+    const units = [makeUnit({ id: 0 })];
+    const frostBolt = makeFrame({
+      units,
+      tickEffects: [{ kind: 'cast', tick: 0, unitId: 0, skillId: 'frost-bolt', targetId: 0 }],
+    });
+    const venomShot = makeFrame({
+      units,
+      tickEffects: [{ kind: 'cast', tick: 0, unitId: 0, skillId: 'venom-shot', targetId: 0 }],
+    });
+
+    expect(drawAndRecord(frostBolt)).toEqual(drawAndRecord(frostBolt));
+    expect(drawAndRecord(frostBolt)).not.toEqual(drawAndRecord(venomShot));
+  });
+
+  it('draws an inline line-flash overlay for an attack tick effect', () => {
+    const units = [makeUnit({ id: 0 }), makeUnit({ id: 1 })];
+    const withoutAttack = makeFrame({ units });
+    const withAttack = makeFrame({
+      units,
+      tickEffects: [{ kind: 'attack', tick: 0, unitId: 0, targetId: 1 }],
+    });
+
+    expect(callCount(drawAndRecord(withAttack), 'stroke')).toBe(
+      callCount(drawAndRecord(withoutAttack), 'stroke') + 1,
+    );
+    expect(callCount(drawAndRecord(withAttack), 'lineTo')).toBe(
+      callCount(drawAndRecord(withoutAttack), 'lineTo') + 1,
+    );
+  });
+
+  it('draws an inline ring marker overlay for a damage tick effect', () => {
+    const units = [makeUnit({ id: 0 })];
+    const withoutDamage = makeFrame({ units });
+    const withDamage = makeFrame({
+      units,
+      tickEffects: [
+        { kind: 'damage', tick: 0, sourceId: null, targetId: 0, amount: 10, absorbed: 0, hpAfter: 90 },
+      ],
+    });
+
+    expect(callCount(drawAndRecord(withDamage), 'arc')).toBe(
+      callCount(drawAndRecord(withoutDamage), 'arc') + 1,
+    );
+  });
+
+  it('draws tickEffects for units regardless of dead flag (a unit can die on the same tick)', () => {
+    const units = [makeUnit({ id: 0 }), makeUnit({ id: 1, dead: true })];
+    const withoutDamage = makeFrame({ units });
+    const withDamage = makeFrame({
+      units,
+      tickEffects: [
+        { kind: 'damage', tick: 0, sourceId: 0, targetId: 1, amount: 90, absorbed: 0, hpAfter: 0 },
+      ],
+    });
+
+    expect(callCount(drawAndRecord(withDamage), 'arc')).toBe(
+      callCount(drawAndRecord(withoutDamage), 'arc') + 1,
+    );
+  });
+
+  it('is a no-op when tickEffects is empty', () => {
+    const frame = makeFrame({ units: [makeUnit({ id: 0 })], tickEffects: [] });
+    expect(drawAndRecord(frame)).toEqual(drawAndRecord(makeFrame({ units: [makeUnit({ id: 0 })] })));
+  });
+});
