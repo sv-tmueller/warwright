@@ -1,5 +1,5 @@
 import { RULESET_VERSION } from '@warwright/core';
-import { ArenaCanvas } from './ArenaCanvas.js';
+import { MatchViewer } from './MatchViewer.js';
 import { WarbandBuilder } from './WarbandBuilder.js';
 
 export function App() {
@@ -7,7 +7,7 @@ export function App() {
     <div>
       <h1>Warwright</h1>
       <p>Ruleset version: {RULESET_VERSION}</p>
-      <ArenaCanvas />
+      <MatchViewer />
       <WarbandBuilder />
     </div>
   );
