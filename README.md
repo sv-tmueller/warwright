@@ -48,7 +48,7 @@ It loads the two warband JSON files, runs the deterministic core, and prints a t
 `packages/web` ships two independent tools:
 
 - **Match viewer** plays the bundled sample match (currently seed 42, against the repo's `builds/warband-a.json` and `builds/warband-b.json`) on a canvas, with play/pause/step controls, a 0.25x-4x speed selector, and a tick seek slider.
-- **Warband builder** is a fully offline editor for warbands: add or remove units, pick a role, a behavior, and skills, and place units, all validated live against the core's own Zod schema. A build can be saved to browser storage, or exported as JSON; exported files use the same layout as `builds/warband-a.json` and `builds/warband-b.json`, so they can be run straight away with `pnpm sim:run --a my-warband.json --b builds/warband-b.json`.
+- **Warband builder** is a fully offline editor for warbands: add or remove units, pick a role, a behavior, and skills, and place units, all validated live against the core's own Zod schema. A build can be saved to browser storage, exported as JSON, or imported back from a JSON file; exported files use the same layout as `builds/warband-a.json` and `builds/warband-b.json`, so they can be run straight away with `pnpm sim:run --a my-warband.json --b builds/warband-b.json`.
 
 The viewer and the builder are not wired together: the viewer always plays the fixed sample match, and the only way to watch a custom warband fight is to export it and run it through `sim:run`.
 
