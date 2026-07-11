@@ -1,141 +1,128 @@
-import { useEffect, useMemo, useReducer, useRef } from 'react';
-import type { ChangeEvent } from 'react';
-import warbandA from '../../../builds/warband-a.json' with { type: 'json' };
-import warbandB from '../../../builds/warband-b.json' with { type: 'json' };
+import { useState } from 'react';
+import { parseWarband } from '@warwright/core';
+import type { MatchEvent, Warband } from '@warwright/core';
+import warbandAJson from '../../../builds/warband-a.json' with { type: 'json' };
+import warbandBJson from '../../../builds/warband-b.json' with { type: 'json' };
 import { runClientMatch } from './match-runner.js';
-import { deriveFrame } from './frame-state.js';
-import { drawFrame, type Transform } from './frame-renderer.js';
-import { createInitialPlaybackState, playback } from './playback.js';
-import { buildFeed } from './event-feed.js';
-import { EventFeed } from './EventFeed.js';
-import { Hud } from './Hud.js';
+import { loadWarband } from './persistence.js';
+import { resolveSetup, type ResolveSourceDeps, type WarbandSource } from './match-setup.js';
+import { MatchSetup, type UploadedFile } from './MatchSetup.js';
+import { MatchPlayback } from './MatchPlayback.js';
 
-const SEED = 42;
-const CANVAS_WIDTH = 960;
-const CANVAS_HEIGHT = 540;
-const SPEED_OPTIONS = [0.25, 0.5, 1, 2, 4];
+const DEFAULT_SEED = '42';
 
-const TRANSFORM: Transform = {
-  width: CANVAS_WIDTH,
-  height: CANVAS_HEIGHT,
-  toCanvas: (pos) => pos,
+// Parsed once at module scope (pure Zod validation, no DOM/localStorage
+// access) so both the initial auto-run and every later Run-click resolve
+// against the same validated sample objects.
+const SAMPLE_A: Warband = parseWarband(warbandAJson);
+const SAMPLE_B: Warband = parseWarband(warbandBJson);
+
+const DEFAULT_SOURCE_A: WarbandSource = { kind: 'sample', id: 'a' };
+const DEFAULT_SOURCE_B: WarbandSource = { kind: 'sample', id: 'b' };
+
+type MatchState = {
+  readonly key: number;
+  readonly log: MatchEvent[];
+  readonly lastTick: number;
+  readonly buildAName: string;
+  readonly buildBName: string;
 };
 
+function lastTickOf(log: readonly MatchEvent[]): number {
+  const lastEvent = log[log.length - 1];
+  return lastEvent ? lastEvent.tick : 0;
+}
+
+function runMatchState(key: number, seed: number, buildA: Warband, buildB: Warband): MatchState {
+  const { eventLog } = runClientMatch(seed, buildA, buildB);
+  return {
+    key,
+    log: eventLog,
+    lastTick: lastTickOf(eventLog),
+    buildAName: buildA.name,
+    buildBName: buildB.name,
+  };
+}
+
+function resolveDeps(): ResolveSourceDeps {
+  return { sampleA: SAMPLE_A, sampleB: SAMPLE_B, loadDraft: loadWarband };
+}
+
 /**
- * The match viewer: runs a fixed sample match once (memoized), drives
- * playback through the pure `playback` reducer, and draws the derived frame
- * at the current tick. `requestAnimationFrame` only dispatches `advance`
- * with an elapsed-time delta while playing - it never reads or writes the
- * event log itself, so frame timing cannot mutate any engine value (see
- * CLAUDE.md's determinism contract and the sub-plan on issue #77). Absorbs
- * the former ArenaCanvas, whose only job (the background fill) `drawFrame`
- * already does.
+ * Owns match setup (seed, per-side source selection, uploads, the setup
+ * error) and the currently loaded match, then hands the resolved match to
+ * `MatchPlayback`, remounted via an incrementing `key` on every Run so a new
+ * match always plays back from tick 0 with zero reducer changes (see the
+ * sub-plan on issue #93). Auto-runs once on mount with the pre-#93 defaults
+ * (seed 42, sample A vs sample B) so the Gate 1 DoD flow (#53) still starts
+ * from a playable match; every later match only comes from an explicit Run.
  */
 export function MatchViewer() {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [seed, setSeed] = useState(DEFAULT_SEED);
+  const [sourceA, setSourceA] = useState<WarbandSource>(DEFAULT_SOURCE_A);
+  const [sourceB, setSourceB] = useState<WarbandSource>(DEFAULT_SOURCE_B);
+  const [uploadedA, setUploadedA] = useState<UploadedFile | null>(null);
+  const [uploadedB, setUploadedB] = useState<UploadedFile | null>(null);
+  const [setupError, setSetupError] = useState<string | null>(null);
+  const [match, setMatch] = useState<MatchState>(() =>
+    runMatchState(0, Number(DEFAULT_SEED), SAMPLE_A, SAMPLE_B),
+  );
 
-  const log = useMemo(() => runClientMatch(SEED, warbandA, warbandB).eventLog, []);
-  const lastTick = useMemo(() => {
-    const lastEvent = log[log.length - 1];
-    return lastEvent ? lastEvent.tick : 0;
-  }, [log]);
-
-  const [state, dispatch] = useReducer(playback, lastTick, createInitialPlaybackState);
-
-  // Behavior-preserving refactor: the draw effect below used to derive the
-  // frame inline; hoisting it lets the Hud consume the same FrameState
-  // without a second derivation (see the sub-plan on issue #52).
-  const frame = useMemo(() => deriveFrame(log, state.tick), [log, state.tick]);
-  const feed = useMemo(() => buildFeed(log), [log]);
-
-  // Redraws whenever the displayed tick (or the log itself) changes,
-  // regardless of what triggered the change: a step, a seek, or an
-  // rAF-driven advance.
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) {
-      return;
+  function handleSourceChange(side: 'A' | 'B', source: WarbandSource): void {
+    if (side === 'A') {
+      setSourceA(source);
+    } else {
+      setSourceB(source);
     }
-    const context = canvas.getContext('2d');
-    if (!context) {
-      return;
-    }
-    drawFrame(context, frame, TRANSFORM);
-  }, [frame]);
-
-  // Runs only while playing, so it starts/stops with status rather than
-  // resetting every tick; that keeps `lastTimestamp` valid across frames so
-  // `deltaMs` reflects real elapsed time, not a re-mounted 0.
-  useEffect(() => {
-    if (state.status !== 'playing') {
-      return;
-    }
-
-    let frameId: number;
-    let lastTimestamp: number | null = null;
-    const loop = (timestamp: number): void => {
-      if (lastTimestamp !== null) {
-        dispatch({ type: 'advance', deltaMs: timestamp - lastTimestamp });
-      }
-      lastTimestamp = timestamp;
-      frameId = requestAnimationFrame(loop);
-    };
-    frameId = requestAnimationFrame(loop);
-
-    return () => cancelAnimationFrame(frameId);
-  }, [state.status]);
-
-  function handleSpeedChange(event: ChangeEvent<HTMLSelectElement>): void {
-    dispatch({ type: 'setSpeed', speed: Number(event.target.value) });
   }
 
-  function handleSeek(event: ChangeEvent<HTMLInputElement>): void {
-    dispatch({ type: 'seek', tick: Number(event.target.value) });
+  function handleUploadSuccess(side: 'A' | 'B', warband: Warband, fileName: string): void {
+    const uploaded: UploadedFile = { warband, fileName };
+    const source: WarbandSource = { kind: 'upload', warband, fileName };
+    if (side === 'A') {
+      setUploadedA(uploaded);
+      setSourceA(source);
+    } else {
+      setUploadedB(uploaded);
+      setSourceB(source);
+    }
+    setSetupError(null);
+  }
+
+  function handleRun(): void {
+    const result = resolveSetup(seed, sourceA, sourceB, resolveDeps());
+    if (!result.ok) {
+      setSetupError(result.error);
+      return;
+    }
+    setSetupError(null);
+    setMatch((current) => runMatchState(current.key + 1, result.seed, result.buildA, result.buildB));
   }
 
   return (
-    <section>
-      <h2>Match Viewer</h2>
-      <canvas ref={canvasRef} width={CANVAS_WIDTH} height={CANVAS_HEIGHT} />
-      <div>
-        <button type="button" onClick={() => dispatch({ type: 'play' })} disabled={state.status === 'playing'}>
-          Play
-        </button>
-        <button type="button" onClick={() => dispatch({ type: 'pause' })} disabled={state.status === 'paused'}>
-          Pause
-        </button>
-        <button type="button" onClick={() => dispatch({ type: 'step' })}>
-          Step
-        </button>
-        <label>
-          Speed
-          <select value={state.speed} onChange={handleSpeedChange}>
-            {SPEED_OPTIONS.map((speed) => (
-              <option key={speed} value={speed}>
-                {speed}x
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Tick {state.tick} / {lastTick}
-          <input
-            type="range"
-            min={0}
-            max={lastTick}
-            value={state.tick}
-            onChange={handleSeek}
-          />
-        </label>
-      </div>
-      <Hud
-        frame={frame}
-        speed={state.speed}
-        lastTick={lastTick}
-        buildAName={warbandA.name}
-        buildBName={warbandB.name}
+    <>
+      <MatchSetup
+        seed={seed}
+        onSeedChange={setSeed}
+        sourceA={sourceA}
+        sourceB={sourceB}
+        uploadedA={uploadedA}
+        uploadedB={uploadedB}
+        onSourceChange={handleSourceChange}
+        onUploadSuccess={handleUploadSuccess}
+        onUploadError={setSetupError}
+        sampleAName={SAMPLE_A.name}
+        sampleBName={SAMPLE_B.name}
+        error={setupError}
+        onRun={handleRun}
       />
-      <EventFeed entries={feed} currentTick={state.tick} />
-    </section>
+      <MatchPlayback
+        key={match.key}
+        log={match.log}
+        lastTick={match.lastTick}
+        buildAName={match.buildAName}
+        buildBName={match.buildBName}
+      />
+    </>
   );
 }
