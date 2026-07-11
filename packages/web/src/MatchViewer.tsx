@@ -6,6 +6,9 @@ import { runClientMatch } from './match-runner.js';
 import { deriveFrame } from './frame-state.js';
 import { drawFrame, type Transform } from './frame-renderer.js';
 import { createInitialPlaybackState, playback } from './playback.js';
+import { buildFeed } from './event-feed.js';
+import { EventFeed } from './EventFeed.js';
+import { Hud } from './Hud.js';
 
 const SEED = 42;
 const CANVAS_WIDTH = 960;
@@ -39,6 +42,12 @@ export function MatchViewer() {
 
   const [state, dispatch] = useReducer(playback, lastTick, createInitialPlaybackState);
 
+  // Behavior-preserving refactor: the draw effect below used to derive the
+  // frame inline; hoisting it lets the Hud consume the same FrameState
+  // without a second derivation (see the sub-plan on issue #52).
+  const frame = useMemo(() => deriveFrame(log, state.tick), [log, state.tick]);
+  const feed = useMemo(() => buildFeed(log), [log]);
+
   // Redraws whenever the displayed tick (or the log itself) changes,
   // regardless of what triggered the change: a step, a seek, or an
   // rAF-driven advance.
@@ -51,8 +60,8 @@ export function MatchViewer() {
     if (!context) {
       return;
     }
-    drawFrame(context, deriveFrame(log, state.tick), TRANSFORM);
-  }, [log, state.tick]);
+    drawFrame(context, frame, TRANSFORM);
+  }, [frame]);
 
   // Runs only while playing, so it starts/stops with status rather than
   // resetting every tick; that keeps `lastTimestamp` valid across frames so
@@ -119,6 +128,14 @@ export function MatchViewer() {
           />
         </label>
       </div>
+      <Hud
+        frame={frame}
+        speed={state.speed}
+        lastTick={lastTick}
+        buildAName={warbandA.name}
+        buildBName={warbandB.name}
+      />
+      <EventFeed entries={feed} currentTick={state.tick} />
     </section>
   );
 }
