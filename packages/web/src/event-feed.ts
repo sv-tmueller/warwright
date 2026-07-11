@@ -33,10 +33,7 @@ function labelOf(spawn: SpawnInfo): string {
 // Feed text formats event fields only, no combat recomputation: hp comes
 // verbatim from hpAfter, absorbed/magnitude/durationTicks are shown as-is
 // (see CLAUDE.md's determinism contract and the sub-plan on issue #52).
-function formatEntryText(
-  event: MatchEvent,
-  labelById: ReadonlyMap<number, string>,
-): string | null {
+function formatEntryText(event: MatchEvent, labelById: ReadonlyMap<number, string>): string | null {
   const labelFor = (id: number): string => labelById.get(id) ?? `#${id}`;
 
   switch (event.kind) {

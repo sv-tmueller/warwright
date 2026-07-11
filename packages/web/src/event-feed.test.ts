@@ -68,7 +68,7 @@ describe('buildFeed: per-event cases (hand-built log)', () => {
     expect(entries.map((entry) => entry.tick)).toEqual([0, 2, 2, 2, 3, 3, 4, 5, 6, 6]);
   });
 
-  it('assigns a 0-based index matching each entry\'s position in the array', () => {
+  it("assigns a 0-based index matching each entry's position in the array", () => {
     entries.forEach((entry, position) => {
       expect(entry.index).toBe(position);
     });
@@ -94,7 +94,7 @@ describe('buildFeed: per-event cases (hand-built log)', () => {
     expect(entries[4]?.text).toBe('B·Reaver#1 heals B·Reaver#1 for 20, hp 105');
   });
 
-  it('formats a cast line with the skill\'s display name, not its id', () => {
+  it("formats a cast line with the skill's display name, not its id", () => {
     expect(entries[5]?.text).toBe('A·Vanguard#0 casts Shield Bash on B·Reaver#1');
   });
 
@@ -157,13 +157,13 @@ describe('feedIndexForTick', () => {
     expect(feedIndexForTick(entries, 6)).toBe(entries.length - 1);
   });
 
-  it('returns the previous entry\'s index for a tick with no feed events of its own', () => {
+  it("returns the previous entry's index for a tick with no feed events of its own", () => {
     // tick 1 only has a move event, which is excluded from the feed; the
     // most recent prior entry (match-start at tick 0) should be highlighted.
     expect(feedIndexForTick(entries, 1)).toBe(0);
   });
 
-  it('returns the last entry\'s index for a tick beyond the last entry', () => {
+  it("returns the last entry's index for a tick beyond the last entry", () => {
     expect(feedIndexForTick(entries, 999)).toBe(entries.length - 1);
   });
 });
