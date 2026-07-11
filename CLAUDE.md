@@ -58,4 +58,8 @@ pnpm test
 pnpm sim:run --seed 42 --a builds/warband-a.json --b builds/warband-b.json
 # regenerate the golden-replay snapshot; see the ruleset-version rule in the determinism contract section above
 pnpm --filter @warwright/core gen-golden
+# start the browser sandbox's Vite dev server
+pnpm --filter @warwright/web dev
+# build the browser sandbox's static, hostable bundle (packages/web/dist)
+pnpm --filter @warwright/web build
 ```
