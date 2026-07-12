@@ -18,9 +18,10 @@ pnpm -r typecheck
 pnpm -r lint
 pnpm -r test
 pnpm --filter @warwright/core build
+pnpm dev
 ```
 
-The browser sandbox (`packages/web`) has its own scripts:
+The root `pnpm dev` script launches the browser sandbox's Vite dev server (equivalent to `pnpm --filter @warwright/web dev`). `packages/web` also has its own scripts:
 
 ```bash
 # start the Vite dev server
@@ -47,10 +48,10 @@ It loads the two warband JSON files, runs the deterministic core, and prints a t
 
 `packages/web` ships two independent tools:
 
-- **Match viewer** plays the bundled sample match (currently seed 42, against the repo's `builds/warband-a.json` and `builds/warband-b.json`) on a canvas, with play/pause/step controls, a 0.25x-4x speed selector, and a tick seek slider.
+- **Match viewer** has a setup panel above the canvas: pick a seed (any whole number, defaulting to 42) and a warband for each side, then press "Run match". Each side can be one of the two bundled samples, the warband last saved from the builder, or a JSON file uploaded on the spot through the same validated import path as the builder. Every Run resolves a fresh match and plays it back from tick 0 with the existing play/pause/step controls, a 0.25x-4x speed selector, and a tick seek slider; an invalid seed or warband selection is rejected with an on-screen error and leaves the last valid match running. On first load, the viewer auto-runs seed 42 against the two bundled samples.
 - **Warband builder** is a fully offline editor for warbands: add or remove units, pick a role, a behavior, and skills, and place units, all validated live against the core's own Zod schema. A build can be saved to browser storage, exported as JSON, or imported back from a JSON file; exported files use the same layout as `builds/warband-a.json` and `builds/warband-b.json`, so they can be run straight away with `pnpm sim:run --a my-warband.json --b builds/warband-b.json`.
 
-The viewer and the builder are not wired together: the viewer always plays the fixed sample match, and the only way to watch a custom warband fight is to export it and run it through `sim:run`.
+The viewer and the builder are wired together through browser storage: save a build in the builder, then pick "Builder draft" for a side in the viewer's setup panel and press Run to watch it fight without leaving the browser.
 
 Both tools are a pure view over `@warwright/core`: the client calls the core's public API and renders the resulting event log, it never re-implements resolve logic, and it never imports the core's internal `sim` modules directly (an ESLint guard test enforces this). `requestAnimationFrame` only drives rendering; it never touches simulation state.
 
