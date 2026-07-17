@@ -3,8 +3,12 @@ import { loadConfig } from './config.js';
 import { createDb } from './db/client.js';
 
 const config = loadConfig();
-const { db } = createDb(config.databaseUrl);
-const app = buildApp({ db });
+const { db, pool } = createDb(config.databaseUrl);
+const app = buildApp({
+  db,
+  pool,
+  session: { secret: config.sessionSecret, cookieSecure: config.cookieSecure },
+});
 
 app
   .listen({ port: config.port, host: config.host })

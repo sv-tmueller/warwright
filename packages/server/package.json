@@ -7,19 +7,27 @@
     "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "test": "vitest run --config ../../vitest.config.ts",
+    "test": "vitest run --config ../../vitest.config.ts --no-file-parallelism",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts"
   },
   "dependencies": {
+    "@fastify/cookie": "^11.1.2",
+    "@fastify/csrf-protection": "^8.0.0",
+    "@fastify/rate-limit": "^11.1.0",
+    "@fastify/session": "^11.1.2",
     "@warwright/core": "workspace:*",
+    "argon2": "^0.44.0",
+    "connect-pg-simple": "^10.0.0",
     "drizzle-orm": "^0.45.2",
     "fastify": "^5.10.0",
+    "fastify-plugin": "^6.0.0",
     "fastify-type-provider-zod": "^7.0.0",
     "pg": "^8.22.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@types/connect-pg-simple": "^7.0.3",
     "@types/node": "^26.1.0",
     "@types/pg": "^8.20.0",
     "drizzle-kit": "^0.31.10",
