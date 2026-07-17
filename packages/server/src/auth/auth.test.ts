@@ -336,6 +336,115 @@ describe.skipIf(!url)('auth routes', () => {
     await app.close();
   });
 
+  it('login kills the pre-login session id server-side (fixation): replaying it 401s', async () => {
+    const app = buildTestApp();
+    const email = uniqueEmail();
+    const password = 'correct horse battery staple';
+
+    // Establish a pre-auth session, then have it become authenticated via
+    // register (mirrors the tester's repro: a fixated session id that later
+    // logs in). The pre-login cookie is the one register's response set.
+    const register = await getCsrfToken(app);
+    const registerResponse = await app.inject({
+      method: 'POST',
+      url: '/auth/register',
+      headers: { cookie: register.cookie, 'csrf-token': register.csrfToken },
+      payload: { email, password },
+    });
+    const preLoginCookie = extractCookie(registerResponse.headers['set-cookie']);
+
+    // Sanity: the pre-login cookie is authenticated before login rotates it.
+    const meBeforeLogin = await app.inject({
+      method: 'GET',
+      url: '/auth/me',
+      headers: { cookie: preLoginCookie },
+    });
+    expect(meBeforeLogin.statusCode).toBe(200);
+
+    const loginCsrf = await app.inject({
+      method: 'GET',
+      url: '/auth/csrf',
+      headers: { cookie: preLoginCookie },
+    });
+    const { csrfToken: loginToken } = loginCsrf.json() as { csrfToken: string };
+
+    const loginResponse = await app.inject({
+      method: 'POST',
+      url: '/auth/login',
+      headers: { cookie: preLoginCookie, 'csrf-token': loginToken },
+      payload: { email, password },
+    });
+    expect(loginResponse.statusCode).toBe(200);
+    const postLoginCookie = extractCookie(loginResponse.headers['set-cookie']);
+    expect(postLoginCookie).not.toBe(preLoginCookie);
+
+    // The pre-login session id must be dead server-side: replaying it must
+    // not authenticate (checking only that the cookie VALUE changed is
+    // insufficient — that passed while the old id stayed live in the store).
+    const replayPreLogin = await app.inject({
+      method: 'GET',
+      url: '/auth/me',
+      headers: { cookie: preLoginCookie },
+    });
+    expect(replayPreLogin.statusCode).toBe(401);
+
+    // The new, post-login session must still work.
+    const meAfterLogin = await app.inject({
+      method: 'GET',
+      url: '/auth/me',
+      headers: { cookie: postLoginCookie },
+    });
+    expect(meAfterLogin.statusCode).toBe(200);
+
+    await app.close();
+  });
+
+  it('register kills the pre-register session id server-side (fixation): replaying it 401s', async () => {
+    const app = buildTestApp();
+    const email = uniqueEmail();
+    const password = 'correct horse battery staple';
+
+    // A "planted" pre-auth cookie, as an attacker would set on a victim's
+    // browser before the victim registers.
+    const plant = await app.inject({ method: 'GET', url: '/healthz' });
+    const plantedCookie = extractCookie(plant.headers['set-cookie']);
+
+    const csrf = await app.inject({
+      method: 'GET',
+      url: '/auth/csrf',
+      headers: { cookie: plantedCookie },
+    });
+    const { csrfToken } = csrf.json() as { csrfToken: string };
+
+    const registerResponse = await app.inject({
+      method: 'POST',
+      url: '/auth/register',
+      headers: { cookie: plantedCookie, 'csrf-token': csrfToken },
+      payload: { email, password },
+    });
+    expect(registerResponse.statusCode).toBe(201);
+    const postRegisterCookie = extractCookie(registerResponse.headers['set-cookie']);
+    expect(postRegisterCookie).not.toBe(plantedCookie);
+
+    // The planted, pre-register session id must be dead server-side:
+    // replaying it must not authenticate as the newly-registered user.
+    const replayPlanted = await app.inject({
+      method: 'GET',
+      url: '/auth/me',
+      headers: { cookie: plantedCookie },
+    });
+    expect(replayPlanted.statusCode).toBe(401);
+
+    const meAfterRegister = await app.inject({
+      method: 'GET',
+      url: '/auth/me',
+      headers: { cookie: postRegisterCookie },
+    });
+    expect(meAfterRegister.statusCode).toBe(200);
+
+    await app.close();
+  });
+
   it('rejects a request body over the body limit with 413', async () => {
     const app = buildTestApp();
     const { cookie, csrfToken } = await getCsrfToken(app);

@@ -1,7 +1,8 @@
 import fastifyRateLimit from '@fastify/rate-limit';
 import { sql } from 'drizzle-orm';
-import type { preHandlerHookHandler } from 'fastify';
+import type { FastifyRequest, preHandlerHookHandler } from 'fastify';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
+import { promisify } from 'node:util';
 import { z } from 'zod';
 import type { Database } from '../db/client.js';
 import { users } from '../db/schema.js';
@@ -54,6 +55,26 @@ function isUniqueViolation(error: unknown): boolean {
 }
 
 /**
+ * Rotates the session id, closing the session-fixation hole at both
+ * privilege-escalation points (login and register).
+ *
+ * `@fastify/session@11.1.2`'s `session.regenerate()` only issues a new
+ * session id; it does NOT destroy the old id's row in the store, so a
+ * pre-auth (or attacker-planted) session id stays fully authenticated after
+ * regenerate() alone. Captures the pre-regenerate id and explicitly destroys
+ * it in the store afterward so the old id is dead server-side, not just
+ * superseded client-side by a changed cookie value.
+ */
+async function rotateSession(request: FastifyRequest): Promise<void> {
+  const oldSessionId = request.session.sessionId;
+  await request.session.regenerate();
+  if (oldSessionId && oldSessionId !== request.session.sessionId) {
+    const destroy = promisify(request.sessionStore.destroy.bind(request.sessionStore));
+    await destroy(oldSessionId);
+  }
+}
+
+/**
  * Registers the /auth/* routes (register, login, logout, me, csrf). Must be
  * registered after the session plugin (src/plugins/session.ts) has attached
  * request.session, app.csrfProtection, and reply.generateCsrf; see
@@ -90,6 +111,10 @@ const authRoutes: FastifyPluginAsyncZod<AuthRoutesOptions> = async (app, options
         const [user] = await db.insert(users).values({ email, passwordHash }).returning();
         if (!user) throw new Error('user insert returned no row');
 
+        // Rotate the session id on register too: registering must kill any
+        // pre-auth (or attacker-planted) session id, not just the one set
+        // on login. See rotateSession's doc comment.
+        await rotateSession(request);
         request.session.set('userId', user.id);
         await request.session.save();
 
@@ -132,9 +157,10 @@ const authRoutes: FastifyPluginAsyncZod<AuthRoutesOptions> = async (app, options
         return GENERIC_INVALID_CREDENTIALS;
       }
 
-      // Regenerate the session id on login so an attacker who fixated a
-      // pre-login session id can't ride it into an authenticated one.
-      await request.session.regenerate();
+      // Rotate the session id on login so an attacker who fixated a
+      // pre-login session id can't ride it into an authenticated one. See
+      // rotateSession's doc comment: regenerate() alone isn't enough.
+      await rotateSession(request);
       request.session.set('userId', user.id);
       await request.session.save();
 
