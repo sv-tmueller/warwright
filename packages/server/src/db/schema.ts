@@ -4,12 +4,14 @@ import {
   check,
   index,
   integer,
+  json,
   jsonb,
   pgTable,
   text,
   timestamp,
   uniqueIndex,
   uuid,
+  varchar,
 } from 'drizzle-orm/pg-core';
 
 // Base schema for the server's Postgres persistence layer, shaped by later
@@ -78,3 +80,17 @@ export const ratings = pgTable('ratings', {
   rating: integer('rating').notNull().default(1500),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+// Shaped to match connect-pg-simple's expected session-store table exactly
+// (sid PK, sess json, expire timestamp(6) + an index on expire).
+// createTableIfMissing is set to false when the store is wired up (see
+// src/plugins/session.ts) so drizzle stays the single schema owner.
+export const sessions = pgTable(
+  'sessions',
+  {
+    sid: varchar('sid', { length: 255 }).primaryKey(),
+    sess: json('sess').notNull(),
+    expire: timestamp('expire', { precision: 6, withTimezone: false }).notNull(),
+  },
+  (table) => [index('sessions_expire_idx').on(table.expire)]
+);
