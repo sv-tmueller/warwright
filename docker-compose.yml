@@ -1,0 +1,22 @@
+services:
+  postgres:
+    # Keep in sync with the postgres image pinned in .github/workflows/ci.yml.
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: warwright
+    ports:
+      # Host port defaults to 5433 to dodge collisions with a contributor's
+      # own local Postgres on 5432; override with WARWRIGHT_PG_PORT.
+      - '${WARWRIGHT_PG_PORT:-5433}:5432'
+    volumes:
+      - warwright_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  warwright_postgres_data:
