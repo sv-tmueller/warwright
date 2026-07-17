@@ -4,7 +4,7 @@ export { runMatch } from './sim/match.js';
 export type { MatchResult, RunMatch, Winner } from './sim/types.js';
 export type { MatchEvent } from './sim/events.js';
 export { RULESET_VERSION } from './sim/constants.js';
-export { parseWarband } from './content/schemas.js';
+export { parseWarband, WarbandSchema } from './content/schemas.js';
 export type { Role, Skill, UnitBuild, Warband } from './content/schemas.js';
 export { roles } from './content/data/roles.js';
 export { skills } from './content/data/skills.js';
