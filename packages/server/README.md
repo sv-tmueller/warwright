@@ -64,7 +64,7 @@ Endpoints (all under `/auth`):
 | `/auth/logout` | POST | Destroys the session server-side and clears the cookie. |
 | `/auth/me` | GET | 200 with `{ id, email }` when authenticated, 401 otherwise. |
 
-`/auth/register`, `/auth/login`, and `/auth/logout` require a valid CSRF token (the `csrf-token` header, or `_csrf` in the body) matching the caller's session; `GET` routes are unaffected. Request bodies are capped at 64 KiB (413 above that) and Zod-validated (400 on malformed input).
+`/auth/register`, `/auth/login`, and `/auth/logout` require a valid CSRF token, sent as the `csrf-token` header, matching the caller's session; `GET` routes are unaffected. The check runs as an `onRequest` hook, before body parsing, so a `_csrf` field in the request body is never read — the header is the only supported channel. Request bodies are capped at 64 KiB (413 above that) and Zod-validated (400 on malformed input).
 
 Behind a future reverse proxy, `trustProxy` will need to be configured for the rate limiter and cookie `secure` handling to see the real client IP/scheme — out of scope for this slice.
 

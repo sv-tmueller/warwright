@@ -9,7 +9,11 @@ const EnvSchema = z.object({
   SESSION_SECRET: z.string().min(32),
   // Whether session cookies get the `secure` attribute. Defaults off so
   // local (non-HTTPS) dev works; production deployments must set it true.
-  COOKIE_SECURE: z.coerce.boolean().default(false),
+  // z.stringbool() (not z.coerce.boolean(), which coerces any non-empty
+  // string via Boolean() — so COOKIE_SECURE=false would misparse as true)
+  // reads the string's actual truthiness and fails loud on unrecognized
+  // values.
+  COOKIE_SECURE: z.stringbool().default(false),
 });
 
 export interface Config {

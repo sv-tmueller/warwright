@@ -1,7 +1,9 @@
+import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from '../app.js';
 import { createDb, type Database } from '../db/client.js';
 import { runMigrations } from '../db/migrate.js';
+import { sessions } from '../db/schema.js';
 
 // Test-only session field, exercising request.session.get/set generically.
 declare module 'fastify' {
@@ -37,11 +39,20 @@ describe.skipIf(!url)('session plugin', () => {
     await pool.end();
   });
 
+  async function countSessionRows(): Promise<number> {
+    const rows = await db.select({ count: sql<number>`count(*)::int` }).from(sessions);
+    return rows[0]?.count ?? 0;
+  }
+
   function buildTestApp() {
     const app = buildApp({
       db,
       pool,
-      session: { secret: SESSION_SECRET, cookieSecure: false },
+      // pruneSessionInterval: false — without this, connect-pg-simple's
+      // default background pruner setInterval keeps the process (and
+      // vitest) alive after tests finish. Production omits this option so
+      // the pruner defaults on (see session.pruning.test.ts).
+      session: { secret: SESSION_SECRET, cookieSecure: false, pruneSessionInterval: false },
     });
 
     app.post('/__test/session-count', async (request) => {
@@ -108,6 +119,31 @@ describe.skipIf(!url)('session plugin', () => {
     });
 
     expect(response.statusCode).toBe(200);
+
+    await app.close();
+  });
+
+  it('does not set a session cookie or persist a row for a request that never touches the session (saveUninitialized: false)', async () => {
+    const app = buildTestApp();
+
+    const before = await countSessionRows();
+
+    const response = await app.inject({ method: 'GET', url: '/healthz' });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['set-cookie']).toBeUndefined();
+
+    const after = await countSessionRows();
+    expect(after).toBe(before);
+
+    await app.close();
+  });
+
+  it('still sets a session cookie and persists a row when a route mutates the session (e.g. generateCsrf)', async () => {
+    const app = buildTestApp();
+
+    const response = await app.inject({ method: 'GET', url: '/__test/csrf-token' });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['set-cookie']).toBeDefined();
 
     await app.close();
   });

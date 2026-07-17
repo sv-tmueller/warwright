@@ -31,7 +31,15 @@ describe.skipIf(!url)('auth rate limiting', () => {
   });
 
   function buildTestApp() {
-    return buildApp({ db, pool, session: { secret: SESSION_SECRET, cookieSecure: false } });
+    // pruneSessionInterval: false — see plugins/session.test.ts's matching
+    // comment: without this, connect-pg-simple's background pruner timer
+    // can keep the process (and vitest) alive. Production omits this
+    // option so the pruner defaults on.
+    return buildApp({
+      db,
+      pool,
+      session: { secret: SESSION_SECRET, cookieSecure: false, pruneSessionInterval: false },
+    });
   }
 
   it('returns 429 after exceeding the per-route login rate limit', async () => {

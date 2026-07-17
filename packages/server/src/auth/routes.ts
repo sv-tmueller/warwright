@@ -115,8 +115,16 @@ const authRoutes: FastifyPluginAsyncZod<AuthRoutesOptions> = async (app, options
         // pre-auth (or attacker-planted) session id, not just the one set
         // on login. See rotateSession's doc comment.
         await rotateSession(request);
+        // Setting a key is enough: the session plugin's onSend hook (see
+        // plugins/session.ts's saveUninitialized: false) persists any
+        // *modified* session automatically before the response is sent, and
+        // sets exactly one Set-Cookie header. An explicit save() here would
+        // mark the session as already-saved/unmodified ahead of onSend,
+        // which (with saveUninitialized: false) makes onSend both clear the
+        // stale pre-rotate cookie *and* re-set the new one, emitting two
+        // Set-Cookie headers for the same name — the first (cleared) one
+        // then wins if a caller reads only the first header.
         request.session.set('userId', user.id);
-        await request.session.save();
 
         reply.code(201);
         return { id: user.id, email: user.email };
@@ -161,8 +169,10 @@ const authRoutes: FastifyPluginAsyncZod<AuthRoutesOptions> = async (app, options
       // pre-login session id can't ride it into an authenticated one. See
       // rotateSession's doc comment: regenerate() alone isn't enough.
       await rotateSession(request);
+      // See the matching comment in /auth/register: no explicit save()
+      // here, so the onSend hook (the sole saver) emits a single, correct
+      // Set-Cookie header instead of a clear+set pair.
       request.session.set('userId', user.id);
-      await request.session.save();
 
       return { id: user.id, email: user.email };
     }

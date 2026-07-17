@@ -17,6 +17,8 @@ const BODY_LIMIT_BYTES = 64 * 1024;
 export interface SessionConfig {
   secret: string;
   cookieSecure: boolean;
+  /** See SessionPluginOptions's doc comment (src/plugins/session.ts): defaults on, tests pass false. */
+  pruneSessionInterval?: boolean;
 }
 
 export interface BuildAppOptions {
@@ -59,6 +61,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       pool: options.pool,
       secret: options.session.secret,
       cookieSecure: options.session.cookieSecure,
+      pruneSessionInterval: options.session.pruneSessionInterval,
     });
     void app.register(authRoutes, { db });
   }

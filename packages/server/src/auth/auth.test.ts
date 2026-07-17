@@ -39,7 +39,15 @@ describe.skipIf(!url)('auth routes', () => {
   });
 
   function buildTestApp() {
-    return buildApp({ db, pool, session: { secret: SESSION_SECRET, cookieSecure: false } });
+    // pruneSessionInterval: false — see plugins/session.test.ts's matching
+    // comment: without this, connect-pg-simple's background pruner timer
+    // can keep the process (and vitest) alive. Production omits this
+    // option so the pruner defaults on.
+    return buildApp({
+      db,
+      pool,
+      session: { secret: SESSION_SECRET, cookieSecure: false, pruneSessionInterval: false },
+    });
   }
 
   /** GETs a fresh CSRF token and returns it with the session cookie it was issued on. */
@@ -405,16 +413,15 @@ describe.skipIf(!url)('auth routes', () => {
     const password = 'correct horse battery staple';
 
     // A "planted" pre-auth cookie, as an attacker would set on a victim's
-    // browser before the victim registers.
-    const plant = await app.inject({ method: 'GET', url: '/healthz' });
+    // browser before the victim registers. /healthz no longer works as the
+    // plant route: it never touches the session, and with
+    // saveUninitialized: false (see plugins/session.ts) it sets no cookie
+    // at all. /auth/csrf does touch the session (generateCsrf() mutates
+    // it), so it's the route that actually establishes a pre-auth session
+    // — exactly what an attacker's planted-cookie flow depends on.
+    const plant = await app.inject({ method: 'GET', url: '/auth/csrf' });
     const plantedCookie = extractCookie(plant.headers['set-cookie']);
-
-    const csrf = await app.inject({
-      method: 'GET',
-      url: '/auth/csrf',
-      headers: { cookie: plantedCookie },
-    });
-    const { csrfToken } = csrf.json() as { csrfToken: string };
+    const { csrfToken } = plant.json() as { csrfToken: string };
 
     const registerResponse = await app.inject({
       method: 'POST',

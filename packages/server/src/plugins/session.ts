@@ -13,6 +13,16 @@ export interface SessionPluginOptions {
   secret: string;
   /** Whether the session cookie gets the `secure` attribute (prod: true, local dev: false). */
   cookieSecure: boolean;
+  /**
+   * Whether connect-pg-simple's background pruner (a `setInterval` that
+   * deletes expired session rows) runs. Defaults to `true`: production must
+   * keep this on, or the "sessions" table grows without bound. Tests pass
+   * `false`, since the timer would otherwise keep the process (and vitest)
+   * alive after tests finish; the `onClose` hook below already stops the
+   * timer on clean shutdown, which is what makes leaving it on in
+   * production safe.
+   */
+  pruneSessionInterval?: boolean;
 }
 
 // Sessions live 7 days; matches the cookie's maxAge.
@@ -33,14 +43,25 @@ async function sessionPlugin(app: FastifyInstance, options: SessionPluginOptions
     // Drizzle (src/db/schema.ts) is the single owner of the "sessions"
     // table's schema; connect-pg-simple must never try to create it.
     createTableIfMissing: false,
-    // Without this, connect-pg-simple starts a setInterval pruner that
-    // keeps the Node process (and vitest) alive after tests finish.
-    pruneSessionInterval: false,
+    // `undefined` (the default, when the option is omitted) lets
+    // connect-pg-simple run its background pruner on its own default
+    // interval — required in production so the table doesn't grow without
+    // bound. Only an explicit `pruneSessionInterval: false` disables it
+    // (tests do this; see SessionPluginOptions's doc comment).
+    pruneSessionInterval: options.pruneSessionInterval === false ? false : undefined,
   });
 
   await app.register(fastifyCookie);
   await app.register(fastifySession, {
     secret: options.secret,
+    // Anonymous requests that never touch the session (e.g. GET /healthz,
+    // or any GET before a route calls session.set/generateCsrf) must not
+    // persist a row — otherwise every request, authenticated or not, grows
+    // the "sessions" table. Routes that do mutate the session (login,
+    // register, GET /auth/csrf's generateCsrf()) still get saved: mutating
+    // request.session is exactly what flips @fastify/session's internal
+    // "saved" flag regardless of this setting.
+    saveUninitialized: false,
     cookie: {
       httpOnly: true,
       sameSite: 'lax',

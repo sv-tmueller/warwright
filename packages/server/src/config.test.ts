@@ -46,6 +46,25 @@ describe('loadConfig', () => {
     expect(secure.cookieSecure).toBe(true);
   });
 
+  it('parses COOKIE_SECURE="false" as false (not a truthy non-empty string)', () => {
+    const config = loadConfig({
+      DATABASE_URL: 'postgresql://user:pass@localhost:5432/warwright',
+      SESSION_SECRET,
+      COOKIE_SECURE: 'false',
+    });
+    expect(config.cookieSecure).toBe(false);
+  });
+
+  it('throws loudly when COOKIE_SECURE is not a recognized boolean string', () => {
+    expect(() =>
+      loadConfig({
+        DATABASE_URL: 'postgresql://user:pass@localhost:5432/warwright',
+        SESSION_SECRET,
+        COOKIE_SECURE: 'banana',
+      })
+    ).toThrow();
+  });
+
   it('throws loudly when DATABASE_URL is missing', () => {
     expect(() => loadConfig({ SESSION_SECRET })).toThrow();
   });
