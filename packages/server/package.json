@@ -7,7 +7,7 @@
     "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "test": "vitest run --config ../../vitest.config.ts",
+    "test": "vitest run --config ../../vitest.config.ts --no-file-parallelism",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts"
   },
@@ -21,6 +21,7 @@
     "connect-pg-simple": "^10.0.0",
     "drizzle-orm": "^0.45.2",
     "fastify": "^5.10.0",
+    "fastify-plugin": "^6.0.0",
     "fastify-type-provider-zod": "^7.0.0",
     "pg": "^8.22.0",
     "zod": "^4.4.3"
