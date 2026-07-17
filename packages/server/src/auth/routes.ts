@@ -1,3 +1,4 @@
+import fastifyRateLimit from '@fastify/rate-limit';
 import { sql } from 'drizzle-orm';
 import type { preHandlerHookHandler } from 'fastify';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
@@ -20,6 +21,11 @@ const CredentialsBodySchema = z.object({
   email: z.email().max(254),
   password: z.string().min(8).max(128),
 });
+
+// Applied to /auth/register and /auth/login: brute-force/credential-stuffing
+// throttling. The in-memory store (the plugin's default) is per-process,
+// fine for a single server instance; a shared store is a later concern.
+const AUTH_RATE_LIMIT = { max: 10, timeWindow: '1 minute' } as const;
 
 const GENERIC_INVALID_CREDENTIALS = { error: 'Invalid credentials' } as const;
 const GENERIC_NOT_AUTHENTICATED = { error: 'Not authenticated' } as const;
@@ -56,6 +62,10 @@ function isUniqueViolation(error: unknown): boolean {
 const authRoutes: FastifyPluginAsyncZod<AuthRoutesOptions> = async (app, options) => {
   const { db } = options;
 
+  // global: false — rate limiting only applies to routes that opt in via
+  // { config: { rateLimit: ... } }, not to every route on the app.
+  await app.register(fastifyRateLimit, { global: false });
+
   // app.csrfProtection is attached by the session plugin's own (deferred,
   // asynchronous) registration; referencing it lazily inside the hook
   // wrapper, rather than capturing app.csrfProtection at registration time,
@@ -67,7 +77,11 @@ const authRoutes: FastifyPluginAsyncZod<AuthRoutesOptions> = async (app, options
 
   app.post(
     '/auth/register',
-    { onRequest: csrfProtection, schema: { body: CredentialsBodySchema } },
+    {
+      onRequest: csrfProtection,
+      schema: { body: CredentialsBodySchema },
+      config: { rateLimit: AUTH_RATE_LIMIT },
+    },
     async (request, reply) => {
       const { email, password } = request.body;
       const passwordHash = await hashPassword(password);
@@ -93,7 +107,11 @@ const authRoutes: FastifyPluginAsyncZod<AuthRoutesOptions> = async (app, options
 
   app.post(
     '/auth/login',
-    { onRequest: csrfProtection, schema: { body: CredentialsBodySchema } },
+    {
+      onRequest: csrfProtection,
+      schema: { body: CredentialsBodySchema },
+      config: { rateLimit: AUTH_RATE_LIMIT },
+    },
     async (request, reply) => {
       const { email, password } = request.body;
 
