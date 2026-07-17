@@ -2,7 +2,7 @@
 
 Fastify + PostgreSQL/Drizzle scaffold for Warwright's authoritative server (Phase 2). Depends on `@warwright/core` directly and never re-implements combat or content rules; it wraps the core.
 
-This slice ships no product endpoints — no auth, matchmaking, or match-resolution routes (those land in #55-#58). It establishes the base schema, migrations, the Fastify app factory, and the local/CI Postgres setup those slices build on.
+Auth (register/login/logout/session lifecycle, CSRF, rate limiting) landed in #55. Matchmaking and match-resolution routes are still to come (#56-#58).
 
 ## Environment variables
 
@@ -11,6 +11,8 @@ This slice ships no product endpoints — no auth, matchmaking, or match-resolut
 | `DATABASE_URL` | yes | — | A `postgresql://` connection string. Parsed and validated (fail-loud) by `src/config.ts`. |
 | `PORT` | no | `3000` | HTTP port the Fastify app listens on. |
 | `HOST` | no | `0.0.0.0` | Host/interface the Fastify app binds to. |
+| `SESSION_SECRET` | yes | — | Signs session cookies and CSRF secrets. At least 32 characters, fail-loud. `docker run` and any deployment now need this set. |
+| `COOKIE_SECURE` | no | `false` | Whether session cookies get the `secure` attribute. Leave off for local (non-HTTPS) dev; set `true` in production. |
 
 ## Local Postgres (docker-compose)
 
@@ -48,13 +50,31 @@ pnpm --filter @warwright/server start
 
 `GET /healthz` is DB-free (boot smoke test). `GET /readyz` runs `SELECT 1` and is only registered when a database is wired in (see `src/index.ts`).
 
+## Auth
+
+Stateful, server-side sessions: `@fastify/session` backed by a Postgres store (`connect-pg-simple`, pointed at the drizzle-managed `sessions` table — `createTableIfMissing: false`, drizzle stays the schema owner), signed httpOnly cookies via `@fastify/cookie`, CSRF protection via `@fastify/csrf-protection`, and `argon2id` password hashing (OWASP-pinned params) via `argon2`. Stateful sessions (rather than a stateless encrypted cookie) so logout actually revokes the session server-side. Registered only when `db`, `pool`, and `session` are all supplied to `buildApp()` (mirrors `/readyz`'s DB-free-test gating).
+
+Endpoints (all under `/auth`):
+
+| Route | Method | Notes |
+| --- | --- | --- |
+| `/auth/csrf` | GET | Returns `{ csrfToken }`, tied to the caller's session. Fetch before any mutating auth request. |
+| `/auth/register` | POST | `{ email, password }`. 201 + session cookie on success; 409 if the email (case-insensitive) is already registered. Rate-limited (10/min/IP). |
+| `/auth/login` | POST | `{ email, password }`. 200 + a freshly regenerated session id (fixation protection) on success; 401 with an identical generic body for both unknown-email and wrong-password. Rate-limited (10/min/IP). |
+| `/auth/logout` | POST | Destroys the session server-side and clears the cookie. |
+| `/auth/me` | GET | 200 with `{ id, email }` when authenticated, 401 otherwise. |
+
+`/auth/register`, `/auth/login`, and `/auth/logout` require a valid CSRF token (the `csrf-token` header, or `_csrf` in the body) matching the caller's session; `GET` routes are unaffected. Request bodies are capped at 64 KiB (413 above that) and Zod-validated (400 on malformed input).
+
+Behind a future reverse proxy, `trustProxy` will need to be configured for the rate limiter and cookie `secure` handling to see the real client IP/scheme — out of scope for this slice.
+
 ## Tests
 
 ```bash
 pnpm --filter @warwright/server test
 ```
 
-DB-gated tests (`src/db/migrations.test.ts`, `src/app.readyz.test.ts`) skip gracefully when `DATABASE_URL` is unset locally, and are mandatory in CI (a `services:` Postgres block; the tests throw if `CI` is set without `DATABASE_URL`, so they can never silently skip there).
+DB-gated tests (`src/db/migrations.test.ts`, `src/app.readyz.test.ts`, `src/plugins/session.test.ts`, `src/auth/auth.test.ts`, `src/auth/ratelimit.test.ts`) skip gracefully when `DATABASE_URL` is unset locally, and are mandatory in CI (a `services:` Postgres block; the tests throw if `CI` is set without `DATABASE_URL`, so they can never silently skip there). The test script runs with `--no-file-parallelism`: several DB-gated suites share the same Postgres schema, and `migrations.test.ts` drops and recreates it, so test files must run sequentially rather than racing each other.
 
 ## Docker
 
@@ -62,7 +82,7 @@ DB-gated tests (`src/db/migrations.test.ts`, `src/app.readyz.test.ts`) skip grac
 # build from the repo root (the image needs pnpm-workspace.yaml, the
 # lockfile, and packages/core alongside packages/server)
 docker build -f packages/server/Dockerfile -t warwright-server .
-docker run --rm -e DATABASE_URL=... -p 3000:3000 warwright-server
+docker run --rm -e DATABASE_URL=... -e SESSION_SECRET=... -p 3000:3000 warwright-server
 ```
 
 The container applies migrations, then starts the server.
