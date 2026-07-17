@@ -9,6 +9,7 @@ import type { Pool } from 'pg';
 import authRoutes from './auth/routes.js';
 import type { Database } from './db/client.js';
 import sessionPlugin from './plugins/session.js';
+import warbandRoutes from './warbands/routes.js';
 
 // Rejects request bodies over 64 KiB with a 413, per #55's auth hardening
 // (Fastify's own default is 1 MiB, generous for JSON auth payloads).
@@ -36,8 +37,8 @@ export interface BuildAppOptions {
  * test.ts). /healthz is deliberately DB-free so the boot smoke test never
  * depends on Postgres being up; /readyz is DB-gated (SELECT 1) and only
  * registered when a database is supplied. The session/CSRF plugin and the
- * /auth/* routes are only registered when db, pool, and session are all
- * supplied, mirroring /readyz's DB-free-test gating.
+ * /auth/* and /warbands* routes are only registered when db, pool, and
+ * session are all supplied, mirroring /readyz's DB-free-test gating.
  */
 export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   const app = Fastify({ bodyLimit: BODY_LIMIT_BYTES }).withTypeProvider<ZodTypeProvider>();
@@ -64,6 +65,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       pruneSessionInterval: options.session.pruneSessionInterval,
     });
     void app.register(authRoutes, { db });
+    void app.register(warbandRoutes, { db });
   }
 
   return app;

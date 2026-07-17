@@ -2,7 +2,7 @@
 
 Fastify + PostgreSQL/Drizzle scaffold for Warwright's authoritative server (Phase 2). Depends on `@warwright/core` directly and never re-implements combat or content rules; it wraps the core.
 
-Auth (register/login/logout/session lifecycle, CSRF, rate limiting) landed in #55. Matchmaking and match-resolution routes are still to come (#56-#58).
+Auth (register/login/logout/session lifecycle, CSRF, rate limiting) landed in #55. Warband persistence (#56) is below. Matchmaking and match-resolution routes are still to come (#57-#58).
 
 ## Environment variables
 
@@ -68,13 +68,29 @@ Endpoints (all under `/auth`):
 
 Behind a future reverse proxy, `trustProxy` will need to be configured for the rate limiter and cookie `secure` handling to see the real client IP/scheme — out of scope for this slice.
 
+## Warbands
+
+Authenticated CRUD + list for a user's saved warbands, scoped to that account: no cross-account access. Every write is validated with core's own `WarbandSchema` (reused directly as the Fastify request-body schema) plus a set-membership check against core's exported content registry (`roles`, `skills`, `behaviorIds`), so a structurally valid but content-unknown build (an id core doesn't register) is rejected too — it could never be simulated. Stored builds round-trip byte-for-structurally-equal with the CLI/client JSON format (`{ name, units[] }`, e.g. `builds/warband-a.json`); `GET`-by-id responses are themselves re-validated against `WarbandSchema` on the way out, so a corrupted row fails loudly (500) rather than silently serializing something invalid.
+
+Endpoints (all under `/warbands`, all requiring an authenticated session — 401 `{ error: 'Not authenticated' }` otherwise):
+
+| Route | Method | Notes |
+| --- | --- | --- |
+| `/warbands` | GET | 200, list of `{ id, name, createdAt, updatedAt }` for the caller's own warbands (no `data`). |
+| `/warbands` | POST | Body is a `Warband` (`WarbandSchema`). 201 + the full row (incl. `data`) on success; 400 on an illegal build (schema violation, or an unknown `roleId`/`skillId`/`behaviorId`, named in the error message). |
+| `/warbands/:id` | GET | 200 + the full row; 400 on a malformed uuid `id`; 404 if the id doesn't exist or belongs to another account (indistinguishable by construction — every query is scoped `WHERE id = :id AND user_id = :sessionUserId`, so foreign rows leak nothing). |
+| `/warbands/:id` | PUT | Body is a `Warband`. 200 + the updated row (`updatedAt` advanced) on success; 400/404 as above. |
+| `/warbands/:id` | DELETE | 204 (no body) on success; 404 as above. |
+
+`POST`, `PUT`, and `DELETE` additionally require a valid CSRF token (the `csrf-token` header, matching the caller's session) — 403 otherwise, exactly like the mutating `/auth/*` routes. Request bodies are capped at the same 64 KiB limit (413 above it).
+
 ## Tests
 
 ```bash
 pnpm --filter @warwright/server test
 ```
 
-DB-gated tests (`src/db/migrations.test.ts`, `src/app.readyz.test.ts`, `src/plugins/session.test.ts`, `src/auth/auth.test.ts`, `src/auth/ratelimit.test.ts`) skip gracefully when `DATABASE_URL` is unset locally, and are mandatory in CI (a `services:` Postgres block; the tests throw if `CI` is set without `DATABASE_URL`, so they can never silently skip there). The test script runs with `--no-file-parallelism`: several DB-gated suites share the same Postgres schema, and `migrations.test.ts` drops and recreates it, so test files must run sequentially rather than racing each other.
+DB-gated tests (`src/db/migrations.test.ts`, `src/app.readyz.test.ts`, `src/plugins/session.test.ts`, `src/auth/auth.test.ts`, `src/auth/ratelimit.test.ts`, `src/warbands/warbands.test.ts`) skip gracefully when `DATABASE_URL` is unset locally, and are mandatory in CI (a `services:` Postgres block; the tests throw if `CI` is set without `DATABASE_URL`, so they can never silently skip there). The test script runs with `--no-file-parallelism`: several DB-gated suites share the same Postgres schema, and `migrations.test.ts` drops and recreates it, so test files must run sequentially rather than racing each other.
 
 ## Docker
 
