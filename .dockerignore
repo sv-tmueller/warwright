@@ -1,0 +1,14 @@
+# Repo-root .dockerignore: the server image is built with the repo root as
+# build context (`docker build -f packages/server/Dockerfile .`) because it
+# needs pnpm-workspace.yaml, the lockfile, and packages/core alongside
+# packages/server. Keep this at the context root, not under packages/server,
+# so Docker actually applies it.
+**/node_modules
+**/dist
+**/*.test.ts
+**/.git
+packages/web
+packages/cli
+docs
+builds
+.claude

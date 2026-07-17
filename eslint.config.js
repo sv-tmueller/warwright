@@ -136,4 +136,21 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    files: ['packages/server/src/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['@warwright/core/*', '**/core/src/**'],
+              message:
+                'packages/server only consumes core through its public API (bare @warwright/core); it never imports sim internals directly and duplicates no rules.',
+            },
+          ],
+        },
+      ],
+    },
+  },
 );

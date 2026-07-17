@@ -57,6 +57,10 @@ Both tools are a pure view over `@warwright/core`: the client calls the core's p
 
 All default art is procedural, drawn on canvas at runtime from role and skill ids (role is encoded as color and shape, hp as size); no third-party assets are bundled. A CC0 art pack may be added later, but only through the `AssetProvider` adapter, never by coupling art to game or render logic.
 
+### Server
+
+`packages/server` is the Phase 2 authoritative service scaffold: a Fastify app over PostgreSQL/Drizzle that depends on `@warwright/core` directly and never re-implements combat or content rules. See [`packages/server/README.md`](packages/server/README.md) for environment variables, the local Postgres docker-compose setup, migrations, and running the server. This slice ships no product endpoints; auth, warband CRUD, match resolution, and ratings land in later slices.
+
 ## Build plan
 
 The complete specification lives in [`docs/BUILD_PLAN.md`](docs/BUILD_PLAN.md). The cross-phase house rules (the determinism contract, cross-surface parity, layout, art and content conventions) live in [`CLAUDE.md`](CLAUDE.md) and are inherited by every session and subagent.
