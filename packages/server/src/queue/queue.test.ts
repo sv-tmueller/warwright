@@ -472,4 +472,31 @@ describe.skipIf(!url)('queue routes', () => {
 
     await app.close();
   });
+
+  it('returns 429 after exceeding the per-route POST /queue rate limit (30/min)', async () => {
+    const app = buildTestApp();
+    const user = await registerUser(app);
+
+    const attempt = () =>
+      app.inject({
+        method: 'POST',
+        url: '/queue',
+        headers: { cookie: user.cookie, 'csrf-token': user.csrfToken },
+        // A nonexistent warbandId still counts against the rate limit (the
+        // limiter runs before the handler's own 404 lookup) and avoids
+        // running 31 real sim resolutions just to probe the limiter.
+        payload: { warbandId: '00000000-0000-0000-0000-000000000000' },
+      });
+
+    const statuses: number[] = [];
+    for (let i = 0; i < 31; i += 1) {
+      const response = await attempt();
+      statuses.push(response.statusCode);
+    }
+
+    expect(statuses.slice(0, 30)).toEqual(new Array<number>(30).fill(404));
+    expect(statuses[30]).toBe(429);
+
+    await app.close();
+  });
 });
