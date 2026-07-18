@@ -15,6 +15,13 @@
       "when": 1784317300625,
       "tag": "0001_mature_clea",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1784363514423,
+      "tag": "0002_solid_vulcan",
+      "breakpoints": true
     }
   ]
 }
