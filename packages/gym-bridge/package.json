@@ -6,7 +6,8 @@
     "build": "esbuild src/main.ts --bundle --platform=node --format=esm --outfile=dist/main.js",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "test": "vitest run --config ../../vitest.config.ts"
+    "test": "vitest run --config ../../vitest.config.ts",
+    "gen-fixture": "tsx src/scripts/gen-protocol-fixture.ts"
   },
   "dependencies": {
     "@warwright/core": "workspace:*",
@@ -14,6 +15,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.1.0",
-    "esbuild": "^0.28.1"
+    "esbuild": "^0.28.1",
+    "tsx": "^4.23.0"
   }
 }
