@@ -153,4 +153,21 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    files: ['packages/gym-bridge/src/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['@warwright/core/*', '**/core/src/**'],
+              message:
+                'packages/gym-bridge only consumes core through its public API (bare @warwright/core); it never imports sim internals directly and never re-implements rules.',
+            },
+          ],
+        },
+      ],
+    },
+  },
 );
