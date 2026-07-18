@@ -80,13 +80,19 @@ describe.skipIf(!url)('GET /leaderboard', () => {
     const app = buildTestApp();
     const viewer = await registerUser(app);
 
-    const lowId = await makeUserWithRating(1400);
-    const highId = await makeUserWithRating(1800);
-    const midId = await makeUserWithRating(1600);
+    // Ratings are set far above DEFAULT_RATING (1500) so these fixtures stay
+    // at the very top of the leaderboard no matter how many ~1500-rated rows
+    // the rest of the suite (e.g. queue pairing tests) has already written to
+    // this shared, never-truncated test database. Combined with ?limit=100
+    // below, this keeps the assertion on relative order deterministic instead
+    // of depending on file/test execution order.
+    const lowId = await makeUserWithRating(1_000_400);
+    const highId = await makeUserWithRating(1_000_800);
+    const midId = await makeUserWithRating(1_000_600);
 
     const response = await app.inject({
       method: 'GET',
-      url: '/leaderboard',
+      url: '/leaderboard?limit=100',
       headers: { cookie: viewer.cookie },
     });
     expect(response.statusCode).toBe(200);
