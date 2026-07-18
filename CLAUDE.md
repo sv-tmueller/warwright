@@ -17,12 +17,14 @@ An autobattler. Units are configured (Role, Skills, Behavior) and fight autonomo
 
 ## Layout
 - packages/core/src/sim, pure engine.
+- packages/core/src/sim/observation.ts, the shared observation/action encoder for the gym bridge (and, later, exported inference Behaviors): a pure projection over WorldState/Action, not resolve logic. `OBS_ENCODING_VERSION` is the parity ground truth for every future exported policy; any layout change is a versioned migration.
 - packages/core/src/content, Roles and Skills as Zod-validated data; Behaviors as modules registered by id.
 - packages/core/src/api, documented seams for server and gym (interfaces only).
 - packages/cli, thin runner over the core.
 - packages/web, browser sandbox. The client is a pure view; it calls @warwright/core and renders the event log, never re-implements resolve logic, and never imports core's internal sim resolve modules directly. requestAnimationFrame drives rendering only.
 - packages/server, authoritative service. The server is the only place a ranked match is resolved; clients submit intent only. Every match is reproducible from version, seed, and snapshotted builds. Auth uses vetted libraries (argon2id, a vetted session or JWT library) and never hand-rolled crypto. Snapshot builds at match time and pin the ruleset version per match.
-- gym/ (Python), the training environment. It drives @warwright/core through a batched bridge and never re-implements rules. Trained policies ship as weights plus a pure-TypeScript float64 inference Behavior, subject to the determinism contract.
+- packages/gym-bridge, the Node subprocess the Python gym drives: a batched NDJSON protocol (reset/step/close) over @warwright/core's public `createSteppedMatch` seam, imported through @warwright/core's public API only (no sim internals). `pnpm --filter @warwright/gym-bridge build` bundles it into a standalone dist/main.js that the Python client spawns.
+- gym/ (Python), the training environment. It drives @warwright/core through the batched packages/gym-bridge subprocess and never re-implements rules; its only mirrored logic is the action-kind code table (warwright_gym/actions.py), pinned against the TS encoder by a generated fixture. Trained policies ship as weights plus a pure-TypeScript float64 inference Behavior, subject to the determinism contract.
 
 ## Art conventions
 - Default art is procedural, drawn on canvas at runtime. No bundled third-party assets.
@@ -62,4 +64,12 @@ pnpm --filter @warwright/core gen-golden
 pnpm --filter @warwright/web dev
 # build the browser sandbox's static, hostable bundle (packages/web/dist)
 pnpm --filter @warwright/web build
+# build the gym bridge (dist/main.js) that the Python client spawns
+pnpm --filter @warwright/gym-bridge build
+# regenerate gym/tests/fixtures/protocol_golden.json from the TS encoder
+pnpm --filter @warwright/gym-bridge gen-fixture
+# run the Python gym client's test suite (build the bridge first)
+uv run --directory gym pytest
+# lint the Python gym client
+uv run --directory gym ruff check .
 ```

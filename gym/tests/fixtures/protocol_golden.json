@@ -1,0 +1,115 @@
+{
+  "obsEncodingVersion": 1,
+  "skillCatalog": [
+    "shield-bash",
+    "guardian-ward",
+    "cleave",
+    "frost-bolt",
+    "venom-shot",
+    "mending-touch"
+  ],
+  "skillCatalogLength": 6,
+  "actions": [
+    {
+      "kind": "idle",
+      "action": {
+        "kind": "idle"
+      },
+      "encoded": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "kind": "move",
+      "action": {
+        "kind": "move",
+        "to": {
+          "x": 12,
+          "y": 34
+        }
+      },
+      "encoded": [
+        1,
+        12,
+        34,
+        0
+      ]
+    },
+    {
+      "kind": "move-toward",
+      "action": {
+        "kind": "move-toward",
+        "targetId": 7
+      },
+      "encoded": [
+        2,
+        7,
+        0,
+        0
+      ]
+    },
+    {
+      "kind": "attack",
+      "action": {
+        "kind": "attack",
+        "targetId": 3
+      },
+      "encoded": [
+        3,
+        3,
+        0,
+        0
+      ]
+    },
+    {
+      "kind": "cast",
+      "action": {
+        "kind": "cast",
+        "skillId": "frost-bolt",
+        "targetId": 5
+      },
+      "encoded": [
+        4,
+        5,
+        0,
+        3
+      ]
+    }
+  ],
+  "observation": {
+    "unitId": 0,
+    "vector": [
+      200,
+      200,
+      100,
+      100,
+      0,
+      0,
+      0,
+      -1,
+      -1,
+      -1,
+      -1,
+      1,
+      110,
+      110,
+      120,
+      100,
+      400,
+      2,
+      80,
+      80,
+      400,
+      100,
+      90000
+    ],
+    "length": 23
+  },
+  "selfFieldCount": 11,
+  "unitFieldCount": 6,
+  "numAllies": 1,
+  "numEnemies": 1
+}
