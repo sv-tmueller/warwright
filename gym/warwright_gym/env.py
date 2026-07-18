@@ -117,12 +117,18 @@ def _count_external_units(build: dict[str, Any]) -> int:
     return sum(1 for unit in build["units"] if unit.get("behaviorId") == EXTERNAL_BEHAVIOR_ID)
 
 
-def _validate_build_a(build_a: dict[str, Any]) -> None:
-    count = _count_external_units(build_a)
-    if count != 1:
+def _validate_builds(build_a: dict[str, Any], build_b: dict[str, Any]) -> None:
+    count_a = _count_external_units(build_a)
+    if count_a != 1:
         raise ValueError(
             "WarwrightVectorEnv requires exactly one behaviorId=='external' unit in "
-            f"build_a (the trainable agent), found {count}"
+            f"build_a (the trainable agent), found {count_a}"
+        )
+    count_b = _count_external_units(build_b)
+    if count_b != 0:
+        raise ValueError(
+            "WarwrightVectorEnv requires zero behaviorId=='external' units in build_b "
+            f"(only build_a may contain the trainable agent), found {count_b}"
         )
 
 
@@ -161,7 +167,7 @@ class WarwrightVectorEnv(VectorEnv):
 
         self._build_a = build_a if build_a is not None else default_build_a()
         self._build_b = build_b if build_b is not None else default_build_b()
-        _validate_build_a(self._build_a)
+        _validate_builds(self._build_a, self._build_b)
 
         num_allies = len(self._build_a["units"]) - 1
         num_enemies = len(self._build_b["units"])
@@ -349,8 +355,18 @@ class WarwrightVectorEnv(VectorEnv):
 class WarwrightEnv(Env):
     """Thin single-agent `gymnasium.Env` over a `WarwrightVectorEnv(1, ...)`
     ("the same driver"), so `gymnasium.utils.env_checker.check_env` can run.
-    Not autoreset by Gymnasium convention: call `reset()` again after a
-    `terminated`/`truncated` step."""
+
+    Not autoreset, by the standard single-env Gymnasium convention: call
+    `reset()` again after a `terminated`/`truncated` step. The underlying
+    `WarwrightVectorEnv` DOES autoreset internally (`AutoresetMode.NEXT_STEP`
+    -- required so the vector env's sub-envs stay lockstepped), which would
+    otherwise let a `step()` call after `terminated`/`truncated` silently
+    autoreset (discarding the caller's action and returning a fresh episode
+    instead of raising). To honor the documented single-agent contract,
+    `WarwrightEnv` tracks whether the episode is awaiting `reset()` and
+    raises `RuntimeError` if `step()` is called again before that -- fail
+    loud instead of silently corrupting a training loop that forgot to
+    reset."""
 
     metadata = {"render_modes": []}
 
@@ -374,6 +390,11 @@ class WarwrightEnv(Env):
         )
         self.observation_space = self._vector_env.single_observation_space
         self.action_space = self._vector_env.single_action_space
+        # Set by step() when terminated/truncated; cleared by reset(). Guards
+        # against the underlying WarwrightVectorEnv's NEXT_STEP autoreset
+        # silently absorbing a step() call this class's docstring says must
+        # be a reset() instead.
+        self._awaiting_reset = False
 
     @staticmethod
     def _scalar_info(info: dict[str, Any], index: int) -> dict[str, Any]:
@@ -392,12 +413,22 @@ class WarwrightEnv(Env):
     ) -> tuple[np.ndarray, dict[str, Any]]:
         super().reset(seed=seed)
         obs, info = self._vector_env.reset(seed=seed, options=options)
+        self._awaiting_reset = False
         return obs[0], self._scalar_info(info, 0)
 
     def step(self, action: np.ndarray) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
+        if self._awaiting_reset:
+            raise RuntimeError(
+                "WarwrightEnv.step() called after a terminated/truncated episode "
+                "without an intervening reset(). The underlying WarwrightVectorEnv "
+                "autoresets (AutoresetMode.NEXT_STEP), which would otherwise "
+                "silently discard this action and start a new episode; call "
+                "reset() first."
+            )
         obs, rewards, terminated, truncated, info = self._vector_env.step(
             np.asarray([action])
         )
+        self._awaiting_reset = bool(terminated[0]) or bool(truncated[0])
         return (
             obs[0],
             float(rewards[0]),
