@@ -2,7 +2,7 @@
 
 Fastify + PostgreSQL/Drizzle scaffold for Warwright's authoritative server (Phase 2). Depends on `@warwright/core` directly and never re-implements combat or content rules; it wraps the core.
 
-Auth (register/login/logout/session lifecycle, CSRF, rate limiting) landed in #55. Warband persistence (#56) is below. The authoritative match-resolution primitive (#103, below) landed as a callable module with no HTTP endpoint; the matchmaking queue endpoint that calls it, plus ratings/history, are still to come (#57/#58).
+Auth (register/login/logout/session lifecycle, CSRF, rate limiting) landed in #55. Warband persistence (#56) is below. The authoritative match-resolution primitive (#103, below) landed as a callable module with no HTTP endpoint; the matchmaking queue (#57, below) is the endpoint that calls it. Ratings/history updates are still to come (#58).
 
 ## Environment variables
 
@@ -88,13 +88,25 @@ Endpoints (all under `/warbands`, all requiring an authenticated session — 401
 
 `resolveMatch` (`src/matches/resolve.ts`) is the authoritative match-resolution primitive: a plain async function, not an HTTP route — the matchmaking queue endpoint that will call it is a later slice. Given two build snapshots and a userA/userB pair, it re-validates both builds with core's `parseWarband` (fail-loud), chooses a seed (a `node:crypto` CSPRNG draw in `[0, 2^32)` by default, or a caller-supplied integer in that same range), pins the current `RULESET_VERSION`, calls `core.runMatch` unchanged, and persists one immutable row to `matches` (the canonical `parseWarband` output, not the raw input — so a later edit to the source warband via the `/warbands` routes never touches an already-resolved match). Resolution happens before the insert, so a validation or seed failure persists nothing. It returns `{ matchId, result }`, where `result` is core's full `MatchResult` (winner, event log, hash).
 
+## Matchmaking queue
+
+`POST /queue` submits intent to be matched: `{ warbandId }`, a saved warband owned by the caller (see Warbands above — a foreign or nonexistent id 404s). Pairing is by nearest rating: the queue reads the caller's `ratings` row lazily (`SELECT ... WHERE user_id = :id`; no row means `DEFAULT_RATING` (1500), matching the `ratings.rating` column's own default — nothing is inserted by this read; rating *writes* are #58). If another user is already waiting, the caller is paired with them (nearest-rating scan, FIFO tie-break) and the route calls #103's `resolveMatch` inline — the earlier-enqueued player is always `A`, the joiner `B` — returning `200 { status: 'matched', matchId, result }`. If nobody is waiting, the caller is enqueued and gets `202 { status: 'waiting' }`. A second `POST` while already queued (or mid-resolution) is `409 { error: 'Already queued' }`.
+
+`GET /queue` is a side-effect-free status read: `200 { status: 'matched', matchId, result }` (a delivered result is *retained*, not cleared, until the next `POST` — so a dropped response can't strand a completed match), `200 { status: 'waiting' }`, or `200 { status: 'idle' }`.
+
+`DELETE /queue` leaves the queue: `204` if waiting, `404 { error: 'Not queued' }` if idle or already matched, `409 { error: 'Match currently resolving' }` if a pairing is actively resolving.
+
+`POST` and `DELETE` require a valid CSRF token like the other mutating routes above; `POST` is additionally rate-limited (30/minute) since each pairing runs a full headless sim synchronously. `POST`/`GET`/`DELETE` all 401 without a session.
+
+The queue itself (`src/queue/service.ts`) is in-memory and single-process, instantiated fresh per `buildApp()` call — restart loses all waiting/unclaimed state. This is intentional (see the #57 sub-plan): queue entries are ephemeral intent, and every reproducibility guarantee lives in the persisted `matches` rows written by `resolveMatch`, not in the queue. A shared (e.g. Redis-backed) queue store, needed for a multi-instance deployment, is a later concern. `resolveMatch` is called inline, never through `runMatch` directly — the queue route never re-implements match resolution.
+
 ## Tests
 
 ```bash
 pnpm --filter @warwright/server test
 ```
 
-DB-gated tests (`src/db/migrations.test.ts`, `src/app.readyz.test.ts`, `src/plugins/session.test.ts`, `src/auth/auth.test.ts`, `src/auth/ratelimit.test.ts`, `src/warbands/warbands.test.ts`, `src/matches/resolve.test.ts`) skip gracefully when `DATABASE_URL` is unset locally, and are mandatory in CI (a `services:` Postgres block; the tests throw if `CI` is set without `DATABASE_URL`, so they can never silently skip there). The test script runs with `--no-file-parallelism`: several DB-gated suites share the same Postgres schema, and `migrations.test.ts` drops and recreates it, so test files must run sequentially rather than racing each other.
+DB-gated tests (`src/db/migrations.test.ts`, `src/app.readyz.test.ts`, `src/plugins/session.test.ts`, `src/auth/auth.test.ts`, `src/auth/ratelimit.test.ts`, `src/warbands/warbands.test.ts`, `src/matches/resolve.test.ts`, `src/queue/queue.test.ts`) skip gracefully when `DATABASE_URL` is unset locally, and are mandatory in CI (a `services:` Postgres block; the tests throw if `CI` is set without `DATABASE_URL`, so they can never silently skip there). The test script runs with `--no-file-parallelism`: several DB-gated suites share the same Postgres schema, and `migrations.test.ts` drops and recreates it, so test files must run sequentially rather than racing each other.
 
 ## Docker
 

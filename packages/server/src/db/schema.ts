@@ -73,11 +73,18 @@ export const matches = pgTable(
   (table) => [check('matches_winner_check', sql`${table.winner} in ('A', 'B', 'draw')`)]
 );
 
+// Lazy default: nothing writes a `ratings` row today (that's #58's first
+// rating update); a lookup miss means "never played," treated as this
+// value by the matchmaking queue (see src/queue/service.ts) without
+// inserting a row. Exported so the queue's lazy-default read stays in sync
+// with the column default by construction, not by two hardcoded literals.
+export const DEFAULT_RATING = 1500;
+
 export const ratings = pgTable('ratings', {
   userId: uuid('user_id')
     .primaryKey()
     .references(() => users.id, { onDelete: 'cascade' }),
-  rating: integer('rating').notNull().default(1500),
+  rating: integer('rating').notNull().default(DEFAULT_RATING),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
