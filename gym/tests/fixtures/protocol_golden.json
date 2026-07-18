@@ -1,4 +1,13 @@
 {
+  "obsEncodingVersion": 1,
+  "skillCatalog": [
+    "shield-bash",
+    "guardian-ward",
+    "cleave",
+    "frost-bolt",
+    "venom-shot",
+    "mending-touch"
+  ],
   "skillCatalogLength": 6,
   "actions": [
     {

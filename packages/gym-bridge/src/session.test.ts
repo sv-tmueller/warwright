@@ -10,7 +10,10 @@ const SEED = 42;
 // value drives a match to completion in one round trip.
 const STEP_TICKS = 10_000;
 
-function send(session: ReturnType<typeof createSession>, command: unknown): Record<string, unknown> {
+function send(
+  session: ReturnType<typeof createSession>,
+  command: unknown,
+): Record<string, unknown> {
   const response = session.handleLine(JSON.stringify(command));
   expect(response).not.toBeNull();
   return JSON.parse(response as string) as Record<string, unknown>;
@@ -113,13 +116,23 @@ describe('createSession', () => {
       buildA: {
         name: 'External A',
         units: [
-          { roleId: 'reaver', skillIds: [], behaviorId: EXTERNAL_BEHAVIOR_ID, position: { x: 0, y: 0 } },
+          {
+            roleId: 'reaver',
+            skillIds: [],
+            behaviorId: EXTERNAL_BEHAVIOR_ID,
+            position: { x: 0, y: 0 },
+          },
         ],
       },
       buildB: {
         name: 'Target B',
         units: [
-          { roleId: 'mender', skillIds: [], behaviorId: 'protect-allies', position: { x: 10, y: 0 } },
+          {
+            roleId: 'mender',
+            skillIds: [],
+            behaviorId: 'protect-allies',
+            position: { x: 10, y: 0 },
+          },
         ],
       },
     };
@@ -147,13 +160,23 @@ describe('createSession', () => {
       buildA: {
         name: 'External A',
         units: [
-          { roleId: 'reaver', skillIds: [], behaviorId: EXTERNAL_BEHAVIOR_ID, position: { x: 0, y: 0 } },
+          {
+            roleId: 'reaver',
+            skillIds: [],
+            behaviorId: EXTERNAL_BEHAVIOR_ID,
+            position: { x: 0, y: 0 },
+          },
         ],
       },
       buildB: {
         name: 'Target B',
         units: [
-          { roleId: 'mender', skillIds: [], behaviorId: 'protect-allies', position: { x: 10, y: 0 } },
+          {
+            roleId: 'mender',
+            skillIds: [],
+            behaviorId: 'protect-allies',
+            position: { x: 10, y: 0 },
+          },
         ],
       },
     };
@@ -162,6 +185,56 @@ describe('createSession', () => {
     const response = send(session, { id: 2, cmd: 'step', envs: [{ envId: 0, ticks: 1 }] });
     expect(response.id).toBe(2);
     expect(response.error as string).toMatch(/external/i);
+  });
+
+  it('evicts an envId that threw mid-step so a subsequent step errors until reset is called (poisoned transport)', () => {
+    const session = createSession();
+    const replay = {
+      version: RULESET_VERSION,
+      seed: SEED,
+      buildA: {
+        name: 'External A',
+        units: [
+          {
+            roleId: 'reaver',
+            skillIds: [],
+            behaviorId: EXTERNAL_BEHAVIOR_ID,
+            position: { x: 0, y: 0 },
+          },
+        ],
+      },
+      buildB: {
+        name: 'Target B',
+        units: [
+          {
+            roleId: 'mender',
+            skillIds: [],
+            behaviorId: 'protect-allies',
+            position: { x: 10, y: 0 },
+          },
+        ],
+      },
+    };
+
+    send(session, { id: 1, cmd: 'reset', envs: [{ envId: 0, replay }] });
+    // No action for the living external unit -> the core throws mid-tick.
+    const poisoned = send(session, { id: 2, cmd: 'step', envs: [{ envId: 0, ticks: 1 }] });
+    expect(typeof poisoned.error).toBe('string');
+
+    // A client that catches the {id, error} and naively re-steps the same
+    // envId must NOT get a silently corrupted world back: it must keep
+    // getting the "unknown envId" error until it calls reset.
+    const stillPoisoned = send(session, {
+      id: 3,
+      cmd: 'step',
+      envs: [{ envId: 0, ticks: 1, actions: { '0': encodeAction({ kind: 'idle' }) } }],
+    });
+    expect(stillPoisoned.error as string).toMatch(/unknown envId 0/);
+
+    // reset re-arms it.
+    const resetAgain = send(session, { id: 4, cmd: 'reset', envs: [{ envId: 0, replay }] });
+    const resetEnvs = resetAgain.envs as Array<Record<string, unknown>>;
+    expect(resetEnvs[0]!.done).toBe(false);
   });
 
   it('returns an error frame with a null id for malformed JSON', () => {

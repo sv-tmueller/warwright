@@ -170,4 +170,19 @@ describe('encodeAction / decodeAction', () => {
   it('throws when decoding an out-of-range skill index', () => {
     expect(() => decodeAction([4, 0, 0, 999])).toThrow(/999/);
   });
+
+  it('throws when a slot the kind does not use is non-zero', () => {
+    // idle uses no slots; move uses p1/p2 only; move-toward and attack use
+    // p1 only; cast uses p1 and p3 only. [2, 7, 9, 9] (move-toward with a
+    // stray non-zero p2 and p3) must be rejected, not silently ignored, per
+    // the #63 review: unused slots are a wire contract, not padding.
+    expect(() => decodeAction([0, 1, 0, 0])).toThrow(/unused/);
+    expect(() => decodeAction([0, 0, 1, 0])).toThrow(/unused/);
+    expect(() => decodeAction([0, 0, 0, 1])).toThrow(/unused/);
+    expect(() => decodeAction([1, 12, 34, 1])).toThrow(/unused/);
+    expect(() => decodeAction([2, 7, 9, 9])).toThrow(/unused/);
+    expect(() => decodeAction([3, 3, 1, 0])).toThrow(/unused/);
+    expect(() => decodeAction([3, 3, 0, 1])).toThrow(/unused/);
+    expect(() => decodeAction([4, 5, 1, 0])).toThrow(/unused/);
+  });
 });

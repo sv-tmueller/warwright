@@ -48,3 +48,21 @@ def test_decode_unknown_kind_code_raises():
 def test_decode_out_of_range_skill_index_raises():
     with pytest.raises(ValueError, match="999"):
         decode_action([4, 0, 0, 999])
+
+
+@pytest.mark.parametrize(
+    "encoded",
+    [
+        [0, 1, 0, 0],
+        [0, 0, 1, 0],
+        [0, 0, 0, 1],
+        [1, 12, 34, 1],
+        [2, 7, 9, 9],
+        [3, 3, 1, 0],
+        [3, 3, 0, 1],
+        [4, 5, 1, 0],
+    ],
+)
+def test_decode_rejects_non_zero_unused_slots(encoded):
+    with pytest.raises(ValueError, match="unused"):
+        decode_action(encoded)

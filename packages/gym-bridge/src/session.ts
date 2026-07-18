@@ -150,7 +150,19 @@ export function createSession(): Session {
       if (transport === undefined) {
         throw new Error(`step: unknown envId ${envId}; call reset before stepping it`);
       }
-      const world = transport.step(ticks, decodeActionsRecord(actions));
+      // A per-env step() throw (e.g. a living external unit with no
+      // injected action) leaves the transport mid-tick. Per the seam's
+      // "must not be reused, call reset()" rule, EVICT it here, before the
+      // error surfaces to the caller, so a client that catches {id, error}
+      // and naively re-steps this envId gets the "unknown envId" error
+      // (not a silently corrupted world) until it calls reset.
+      let world: WorldState;
+      try {
+        world = transport.step(ticks, decodeActionsRecord(actions));
+      } catch (error) {
+        envs.delete(envId);
+        throw error;
+      }
       return buildFrame(envId, transport, world);
     });
   }

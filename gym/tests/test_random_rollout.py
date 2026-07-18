@@ -18,9 +18,10 @@ from warwright_gym.transport import Transport
 
 NUM_ENVS = 4
 TICKS_PER_STEP = 20
-# 300 * 20 = 6000 ticks, at least the core's internal MATCH_TICK_CAP: every
-# match is guaranteed to reach `done` (win, loss, or tick-cap draw) at or
-# before that, so this bounds the loop without risking a false "stuck" read.
+# 320 * 20 = 6400 ticks, at least the core's internal MATCH_TICK_CAP (6000):
+# every match is guaranteed to reach `done` (win, loss, or tick-cap draw) at
+# or before that, so this bounds the loop without risking a false "stuck"
+# read.
 MAX_ROUNDS = 320
 
 

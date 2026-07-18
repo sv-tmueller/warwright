@@ -156,22 +156,48 @@ export function encodeAction(action: Action): number[] {
   }
 }
 
+// A slot the given kind does not use MUST be 0 on the wire (see the tag
+// table above): `[2, 7, 9, 9]` (move-toward with a stray p2/p3) must fail
+// loud, not decode leniently, since encodeAction never emits anything but 0
+// there and a non-zero unused slot means the wire producer disagrees with
+// this codec about the layout. Pinned at OBS_ENCODING_VERSION 1, before any
+// wire range is locked in for real clients.
+function assertUnusedSlotsAreZero(
+  encoded: readonly [number, number, number, number],
+  usedIndices: readonly number[],
+): void {
+  for (let index = 1; index < encoded.length; index++) {
+    if (usedIndices.includes(index)) continue;
+    if (encoded[index] !== 0) {
+      throw new Error(
+        `decodeAction: unused slot ${index} must be 0, got ${encoded[index]} (encoded: ${JSON.stringify(encoded)})`,
+      );
+    }
+  }
+}
+
 export function decodeAction(encoded: readonly number[]): Action {
   if (encoded.length !== 4) {
     throw new Error(`decodeAction: expected a 4-element tuple, got length ${encoded.length}`);
   }
-  const [kindCode, p1, p2, p3] = encoded as [number, number, number, number];
+  const tuple = encoded as [number, number, number, number];
+  const [kindCode, p1, p2, p3] = tuple;
 
   switch (kindCode) {
     case ACTION_KIND_IDLE:
+      assertUnusedSlotsAreZero(tuple, []);
       return { kind: 'idle' };
     case ACTION_KIND_MOVE:
+      assertUnusedSlotsAreZero(tuple, [1, 2]);
       return { kind: 'move', to: { x: p1, y: p2 } };
     case ACTION_KIND_MOVE_TOWARD:
+      assertUnusedSlotsAreZero(tuple, [1]);
       return { kind: 'move-toward', targetId: p1 };
     case ACTION_KIND_ATTACK:
+      assertUnusedSlotsAreZero(tuple, [1]);
       return { kind: 'attack', targetId: p1 };
     case ACTION_KIND_CAST: {
+      assertUnusedSlotsAreZero(tuple, [1, 3]);
       const skill = skillCatalog[p3];
       if (skill === undefined) {
         throw new Error(`decodeAction: unknown skill index ${p3}`);

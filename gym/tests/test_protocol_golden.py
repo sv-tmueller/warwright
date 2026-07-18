@@ -6,8 +6,11 @@ value-equality. This is what proves Python and TypeScript agree on the
 action encoding; it never re-derives the observation MATH (only the
 action-kind table is mirrored in Python), but it does assert the
 JSON-transported observation values round-trip as exact integers with no
-float drift, and that the mirrored skill catalog stays the same length as
-the TS content catalog.
+float drift, that the mirrored skill catalog matches the TS content catalog
+EXACTLY (order and all, not just length), and that OBS_ENCODING_VERSION
+matches the TS encoder's version -- so a skill add/reorder or an encoder
+layout/version change desyncs Python and TypeScript with a RED test, not
+silently.
 
 Regenerate the fixture with `pnpm --filter @warwright/gym-bridge
 gen-fixture` from the repo root whenever the encoder changes.
@@ -18,7 +21,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from warwright_gym.actions import SKILL_CATALOG, decode_action, encode_action
+from warwright_gym.actions import OBS_ENCODING_VERSION, SKILL_CATALOG, decode_action, encode_action
 
 FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "protocol_golden.json"
 
@@ -43,6 +46,19 @@ def test_action_codec_matches_the_ts_encoder_for_every_kind():
 def test_skill_catalog_length_matches_the_ts_content_catalog():
     fixture = load_fixture()
     assert len(SKILL_CATALOG) == fixture["skillCatalogLength"]
+
+
+def test_skill_catalog_matches_the_ts_content_catalog_exactly():
+    # A skill add/reorder in packages/core/src/content/data/skills.ts must
+    # be caught here, not just a length check -- see the #63 review "the
+    # parity fixture is generate-only" MUST-FIX finding.
+    fixture = load_fixture()
+    assert SKILL_CATALOG == fixture["skillCatalog"]
+
+
+def test_obs_encoding_version_matches_the_ts_encoder():
+    fixture = load_fixture()
+    assert OBS_ENCODING_VERSION == fixture["obsEncodingVersion"]
 
 
 def test_observation_vector_is_all_integers_and_the_declared_length():

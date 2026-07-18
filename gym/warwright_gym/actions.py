@@ -24,6 +24,12 @@ from __future__ import annotations
 
 from typing import Any
 
+# Mirrors packages/core/src/sim/observation.ts's OBS_ENCODING_VERSION: the
+# parity ground truth for the wire protocol. gym/tests/test_protocol_golden.py
+# cross-checks this against the TS-generated fixture's `obsEncodingVersion`
+# so a version bump on either side without the other is caught mechanically.
+OBS_ENCODING_VERSION = 1
+
 ACTION_KIND_IDLE = 0
 ACTION_KIND_MOVE = 1
 ACTION_KIND_MOVE_TOWARD = 2
@@ -31,8 +37,9 @@ ACTION_KIND_ATTACK = 3
 ACTION_KIND_CAST = 4
 
 # Fixed catalog order -- keep in sync with packages/core/src/content/data/skills.ts.
-# gym/tests/test_protocol_golden.py cross-checks this list's length against
-# the TS-generated fixture so a drift here is caught mechanically.
+# gym/tests/test_protocol_golden.py cross-checks this list EXACTLY (order and
+# all, not just length) against the TS-generated fixture so a skill add or
+# reorder here is caught mechanically.
 SKILL_CATALOG = [
     "shield-bash",
     "guardian-ward",
@@ -62,20 +69,41 @@ def encode_action(action: dict[str, Any]) -> list[int]:
     raise ValueError(f"encode_action: unknown action kind {kind!r}")
 
 
+def _assert_unused_slots_are_zero(encoded: list[int], used_indices: tuple[int, ...]) -> None:
+    # Mirrors packages/core/src/sim/observation.ts's decodeAction: a slot the
+    # kind does not use MUST be 0 on the wire. encode_action never emits
+    # anything but 0 there, so a non-zero unused slot means the wire
+    # producer disagrees with this codec about the layout -- fail loud
+    # rather than decode leniently.
+    for index in range(1, len(encoded)):
+        if index in used_indices:
+            continue
+        if encoded[index] != 0:
+            raise ValueError(
+                f"decode_action: unused slot {index} must be 0, got {encoded[index]} "
+                f"(encoded: {encoded!r})"
+            )
+
+
 def decode_action(encoded: list[int]) -> dict[str, Any]:
     if len(encoded) != 4:
         raise ValueError(f"decode_action: expected a 4-element tuple, got length {len(encoded)}")
     kind_code, p1, p2, p3 = encoded
 
     if kind_code == ACTION_KIND_IDLE:
+        _assert_unused_slots_are_zero(encoded, ())
         return {"kind": "idle"}
     if kind_code == ACTION_KIND_MOVE:
+        _assert_unused_slots_are_zero(encoded, (1, 2))
         return {"kind": "move", "to": {"x": p1, "y": p2}}
     if kind_code == ACTION_KIND_MOVE_TOWARD:
+        _assert_unused_slots_are_zero(encoded, (1,))
         return {"kind": "move-toward", "targetId": p1}
     if kind_code == ACTION_KIND_ATTACK:
+        _assert_unused_slots_are_zero(encoded, (1,))
         return {"kind": "attack", "targetId": p1}
     if kind_code == ACTION_KIND_CAST:
+        _assert_unused_slots_are_zero(encoded, (1, 3))
         if p3 < 0 or p3 >= len(SKILL_CATALOG):
             raise ValueError(f"decode_action: unknown skill index {p3}")
         return {"kind": "cast", "skillId": SKILL_CATALOG[p3], "targetId": p1}

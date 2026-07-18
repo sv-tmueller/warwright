@@ -39,6 +39,7 @@ jobs:
       - uses: astral-sh/setup-uv@v8.3.2
         with:
           working-directory: gym
+          python-version: '3.9'
 
       - run: uv sync
         working-directory: gym
