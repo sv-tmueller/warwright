@@ -78,14 +78,24 @@ describe.skipIf(!url)('migrations', () => {
         'matches.winner',
         'matches.result_hash',
         'matches.created_at',
+        'matches.rated_at',
         'ratings.user_id',
         'ratings.rating',
+        'ratings.rating_deviation',
+        'ratings.volatility',
         'ratings.updated_at',
         'sessions.sid',
         'sessions.sess',
         'sessions.expire',
       ])
     );
+  });
+
+  it('stores ratings.rating as double precision (not integer), so unrounded Glicko-2 output is lossless', async () => {
+    const result = await db.execute<{ data_type: string }>(
+      sql`SELECT data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'ratings' AND column_name = 'rating'`
+    );
+    expect(result.rows[0]?.data_type).toBe('double precision');
   });
 
   it('is idempotent: re-running the migrator against an already-migrated database is a no-op', async () => {

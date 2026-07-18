@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import {
   bigint,
   check,
+  doublePrecision,
   index,
   integer,
   json,
@@ -69,22 +70,36 @@ export const matches = pgTable(
     // core's MatchResult.hash is a uint32 number — also stored as bigint.
     resultHash: bigint('result_hash', { mode: 'bigint' }).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    // Nullable double-count guard for #110's applyMatchRatings: null means
+    // "not yet rated." Set exactly once, inside the same transaction that
+    // reads it via `WHERE rated_at IS NULL`, so a second invocation for the
+    // same matchId is a provable no-op (see src/ratings/service.ts).
+    ratedAt: timestamp('rated_at', { withTimezone: true }),
   },
   (table) => [check('matches_winner_check', sql`${table.winner} in ('A', 'B', 'draw')`)]
 );
 
-// Lazy default: nothing writes a `ratings` row today (that's #58's first
-// rating update); a lookup miss means "never played," treated as this
-// value by the matchmaking queue (see src/queue/service.ts) without
-// inserting a row. Exported so the queue's lazy-default read stays in sync
-// with the column default by construction, not by two hardcoded literals.
+// Lazy defaults: nothing writes a `ratings` row today (that's #110's first
+// rating update); a lookup miss means "never played," treated as these
+// values by the matchmaking queue (see src/queue/service.ts) and by
+// applyMatchRatings (see src/ratings/service.ts) without inserting a row.
+// Exported so every lazy-default read stays in sync with the column
+// defaults by construction, not by hardcoded literals scattered around.
 export const DEFAULT_RATING = 1500;
+export const DEFAULT_RATING_DEVIATION = 350;
+export const DEFAULT_VOLATILITY = 0.06;
 
 export const ratings = pgTable('ratings', {
   userId: uuid('user_id')
     .primaryKey()
     .references(() => users.id, { onDelete: 'cascade' }),
-  rating: integer('rating').notNull().default(DEFAULT_RATING),
+  // Unrounded Glicko-2 output, stored at display scale (not the internal
+  // μ/φ scale used by src/ratings/glicko2.ts) — double precision, not
+  // integer, so nothing is lost between rating periods. Never round a
+  // stored value; round only in UI presentation, if ever.
+  rating: doublePrecision('rating').notNull().default(DEFAULT_RATING),
+  ratingDeviation: doublePrecision('rating_deviation').notNull().default(DEFAULT_RATING_DEVIATION),
+  volatility: doublePrecision('volatility').notNull().default(DEFAULT_VOLATILITY),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 

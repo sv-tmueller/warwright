@@ -1,12 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { runMatch } from '@warwright/core';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from '../app.js';
 import { createDb, type Database } from '../db/client.js';
 import { runMigrations } from '../db/migrate.js';
-import { matches, ratings } from '../db/schema.js';
+import { DEFAULT_RATING, DEFAULT_RATING_DEVIATION, matches, ratings } from '../db/schema.js';
 
 const url = process.env.DATABASE_URL;
 
@@ -267,8 +267,13 @@ describe.skipIf(!url)('queue routes', () => {
   // including the P=1200/Q=1600/joiner=1500 example from the #57 sub-plan).
   // This integration test instead proves the DB-backed half of decision 3:
   // a user with no `ratings` row reads as DEFAULT_RATING (1500) without
-  // crashing or inserting a row, and still pairs successfully.
-  it('pairs a user with no ratings row using the lazy 1500 default, without inserting a ratings row', async () => {
+  // crashing, and still pairs successfully. Since #110, a resolved match
+  // also rates both players (applyMatchRatings, hooked in after
+  // resolveMatch — see queue/routes.ts): the row R had none of before the
+  // match is created as part of that rating write, not by the matchmaking
+  // read itself, and R's post-match rating starts from DEFAULT_RATING as
+  // its pre-match value, per the lazy-default contract.
+  it('pairs a user with no ratings row using the lazy 1500 default, then rates both from it', async () => {
     const app = buildTestApp();
     const userP = await registerUser(app);
     const userR = await registerUser(app); // no ratings row at all
@@ -299,9 +304,10 @@ describe.skipIf(!url)('queue routes', () => {
     expect(row!.userAId).toBe(userP.id);
     expect(row!.userBId).toBe(userR.id);
 
-    // Reading R's (lazy-default) rating must not have inserted a row.
+    // R's ratings row was created by the post-resolve rating write, from
+    // the DEFAULT_RATING lazy default it had going into the match.
     const rRatingRows = await db.select().from(ratings).where(eq(ratings.userId, userR.id));
-    expect(rRatingRows.length).toBe(0);
+    expect(rRatingRows.length).toBe(1);
 
     await app.close();
   });
@@ -469,6 +475,51 @@ describe.skipIf(!url)('queue routes', () => {
       payload: { warbandId: '00000000-0000-0000-0000-000000000000' },
     });
     expect(nonexistent.statusCode).toBe(404);
+
+    await app.close();
+  });
+
+  it('rates both players once a queue match resolves: winner up, loser (or both, on a draw) RD shrinks, matches.rated_at is set', async () => {
+    const app = buildTestApp();
+    const userA = await registerUser(app);
+    const userB = await registerUser(app);
+    const warbandAId = await saveWarband(app, userA, warbandA);
+    const warbandBId = await saveWarband(app, userB, warbandB);
+
+    await app.inject({
+      method: 'POST',
+      url: '/queue',
+      headers: { cookie: userA.cookie, 'csrf-token': userA.csrfToken },
+      payload: { warbandId: warbandAId },
+    });
+    const joinResponse = await app.inject({
+      method: 'POST',
+      url: '/queue',
+      headers: { cookie: userB.cookie, 'csrf-token': userB.csrfToken },
+      payload: { warbandId: warbandBId },
+    });
+    const { matchId, result } = joinResponse.json() as { matchId: string; result: { winner: 'A' | 'B' | 'draw' } };
+
+    const rows = await db.select().from(ratings).where(inArray(ratings.userId, [userA.id, userB.id]));
+    expect(rows.length).toBe(2);
+    const rowA = rows.find((row) => row.userId === userA.id)!;
+    const rowB = rows.find((row) => row.userId === userB.id)!;
+
+    expect(rowA.ratingDeviation).toBeLessThan(DEFAULT_RATING_DEVIATION);
+    expect(rowB.ratingDeviation).toBeLessThan(DEFAULT_RATING_DEVIATION);
+    if (result.winner === 'A') {
+      expect(rowA.rating).toBeGreaterThan(DEFAULT_RATING);
+      expect(rowB.rating).toBeLessThan(DEFAULT_RATING);
+    } else if (result.winner === 'B') {
+      expect(rowB.rating).toBeGreaterThan(DEFAULT_RATING);
+      expect(rowA.rating).toBeLessThan(DEFAULT_RATING);
+    } else {
+      expect(rowA.rating).toBeCloseTo(DEFAULT_RATING, 6);
+      expect(rowB.rating).toBeCloseTo(DEFAULT_RATING, 6);
+    }
+
+    const [matchRow] = await db.select().from(matches).where(eq(matches.id, matchId));
+    expect(matchRow?.ratedAt).not.toBeNull();
 
     await app.close();
   });
