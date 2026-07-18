@@ -7,6 +7,14 @@ export type { Action } from './sim/behavior.js';
 export { RULESET_VERSION } from './sim/constants.js';
 export { createSteppedMatch, EXTERNAL_BEHAVIOR_ID } from './sim/stepped.js';
 export type { Replay, SteppedTransport } from './api/seams.js';
+export {
+  OBS_ENCODING_VERSION,
+  OBS_SELF_FIELD_COUNT,
+  OBS_UNIT_FIELD_COUNT,
+  decodeAction,
+  encodeAction,
+  encodeObservation,
+} from './sim/observation.js';
 export { parseWarband, WarbandSchema } from './content/schemas.js';
 export type { Role, Skill, UnitBuild, Warband } from './content/schemas.js';
 export { roles } from './content/data/roles.js';
