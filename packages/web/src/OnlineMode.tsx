@@ -189,7 +189,19 @@ export function OnlineMode() {
       setQueueState({ status: 'error', message: 'Select a saved warband before joining the queue.' });
       return;
     }
+    // Captured BEFORE the await below, so an unmount (which bumps
+    // pollGenerationRef via the cleanup-effect's clearPoll) that happens
+    // while this request is in flight is observable once it resolves, and
+    // the continuation bails instead of calling setState/schedulePoll on a
+    // dead component (see issue #59 review round 2 finding 1: this is the
+    // same ownerless-timer leak class the poll callback already guards
+    // against, reachable here because handleJoin's 'waiting' result arms an
+    // unbounded schedulePoll loop).
+    const generation = pollGenerationRef.current;
     const result = await enqueue(selectedWarbandId);
+    if (pollGenerationRef.current !== generation) {
+      return;
+    }
     applyQueueAction(interpretEnqueueResult(result));
   }
 
@@ -198,11 +210,24 @@ export function OnlineMode() {
    * result: the server can 409 'Match currently resolving' when a pairing
    * is mid-resolution, or fail on the network, and in either case the
    * client must not silently drift out of sync with server state (see
-   * issue #59 review finding 2).
+   * issue #59 review finding 2). On a non-409 failure, also re-schedules a
+   * poll so a stale-but-real server state (e.g. a match that already
+   * resolved) is picked up instead of stranding the UI until a tab switch
+   * (see issue #59 review round 2 finding 3).
    */
   async function handleLeave(): Promise<void> {
     clearPoll();
+    // Captured AFTER clearPoll() bumps the generation (so this call's own
+    // in-flight request is tagged with the generation it owns), but BEFORE
+    // the await, so an unmount that happens while this request is in
+    // flight is observable once it resolves, and the continuation bails
+    // instead of calling setState/schedulePoll on a dead component (see
+    // issue #59 review round 2 finding 1).
+    const generation = pollGenerationRef.current;
     const result = await leaveQueue();
+    if (pollGenerationRef.current !== generation) {
+      return;
+    }
     if (result.ok) {
       setLeaveError(null);
       setQueueState({ status: 'idle' });
@@ -216,7 +241,11 @@ export function OnlineMode() {
       schedulePoll();
       return;
     }
+    // Non-409 failure (e.g. a 404 because the entry was just consumed by a
+    // match): surface the error, but also re-sync via a poll rather than
+    // leaving the client stuck showing 'waiting' with no poll running.
     setLeaveError(result.error);
+    schedulePoll();
   }
 
   // Dismisses a finished match and returns to the idle/queue view. NO
