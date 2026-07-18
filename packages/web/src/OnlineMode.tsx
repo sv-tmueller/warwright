@@ -18,6 +18,12 @@ import { MatchPlayback } from './MatchPlayback.js';
 
 const POLL_INTERVAL_MS = 2000;
 
+// Server-side literal string for a 409 on DELETE /queue when a pairing is
+// mid-resolution (see packages/server/src/queue/routes.ts's
+// GENERIC_RESOLVING). Kept local to this component rather than re-exported
+// from api-client.ts, per the fix's scope (issue #59 review finding 2).
+const RESOLVING_ERROR = 'Match currently resolving';
+
 type QueueState =
   | { readonly status: 'idle' }
   | { readonly status: 'waiting' }
@@ -45,9 +51,17 @@ export function OnlineMode() {
   const [warbandError, setWarbandError] = useState<string | null>(null);
 
   const [queueState, setQueueState] = useState<QueueState>({ status: 'idle' });
+  const [leaveError, setLeaveError] = useState<string | null>(null);
   const pollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Bumped by every clearPoll() call, so an in-flight queueStatus() fetch
+  // started by an already-cancelled poll can tell, after its await resolves,
+  // that it no longer owns the loop (see issue #59 review finding 1: without
+  // this, a poll that resolves after unmount/Leave/Logout would setState on
+  // a dead component and re-arm an ownerless setTimeout loop).
+  const pollGenerationRef = useRef(0);
 
   function clearPoll(): void {
+    pollGenerationRef.current += 1;
     if (pollTimeoutRef.current !== null) {
       clearTimeout(pollTimeoutRef.current);
       pollTimeoutRef.current = null;
@@ -55,7 +69,8 @@ export function OnlineMode() {
   }
 
   // Cleans up any in-flight poll on unmount, so leaving online mode (or the
-  // page) never leaves a dangling setTimeout.
+  // page) never leaves a dangling setTimeout, and invalidates the generation
+  // so a poll fetch already in flight is dropped instead of rescheduling.
   useEffect(() => clearPoll, []);
 
   async function refreshWarbands(): Promise<void> {
@@ -82,9 +97,19 @@ export function OnlineMode() {
 
   function schedulePoll(): void {
     clearPoll();
+    // Captured BEFORE the await below, so a later clearPoll() (unmount,
+    // Leave, Logout, or a newer schedulePoll()) that bumps
+    // pollGenerationRef is observable to this specific in-flight fetch once
+    // it resolves (see issue #59 review finding 1).
+    const generation = pollGenerationRef.current;
     pollTimeoutRef.current = setTimeout(() => {
       void (async () => {
         const result = await queueStatus();
+        if (pollGenerationRef.current !== generation) {
+          // Cancelled while in flight: drop the result and do NOT
+          // reschedule, so no further GET /queue calls are issued.
+          return;
+        }
         applyQueueAction(interpretQueueStatus(result));
       })();
     }, POLL_INTERVAL_MS);
@@ -140,6 +165,7 @@ export function OnlineMode() {
     setWarbands([]);
     setSelectedWarbandId(null);
     setQueueState({ status: 'idle' });
+    setLeaveError(null);
   }
 
   async function handleSaveDraft(): Promise<void> {
@@ -167,9 +193,38 @@ export function OnlineMode() {
     applyQueueAction(interpretEnqueueResult(result));
   }
 
+  /**
+   * Leaves the queue, interpreting (not swallowing) the DELETE /queue
+   * result: the server can 409 'Match currently resolving' when a pairing
+   * is mid-resolution, or fail on the network, and in either case the
+   * client must not silently drift out of sync with server state (see
+   * issue #59 review finding 2).
+   */
   async function handleLeave(): Promise<void> {
     clearPoll();
-    await leaveQueue();
+    const result = await leaveQueue();
+    if (result.ok) {
+      setLeaveError(null);
+      setQueueState({ status: 'idle' });
+      return;
+    }
+    if (result.error === RESOLVING_ERROR) {
+      // A pairing is mid-resolution server-side: the queue entry wasn't
+      // actually removed, so keep/resume polling instead of going idle.
+      setLeaveError(null);
+      setQueueState({ status: 'waiting' });
+      schedulePoll();
+      return;
+    }
+    setLeaveError(result.error);
+  }
+
+  // Dismisses a finished match and returns to the idle/queue view. NO
+  // network call: the user is no longer queued, so re-using handleLeave
+  // here would fire a pointless CSRF fetch plus a guaranteed-404
+  // DELETE /queue (see issue #59 review finding 3).
+  function handleDismissMatch(): void {
+    clearPoll();
     setQueueState({ status: 'idle' });
   }
 
@@ -177,7 +232,7 @@ export function OnlineMode() {
     return (
       <section>
         <h2>Online Match</h2>
-        <button type="button" onClick={handleLeave}>
+        <button type="button" onClick={() => void handleDismissMatch()}>
           Back to queue
         </button>
         <MatchPlayback
@@ -267,6 +322,7 @@ export function OnlineMode() {
             </button>
           )}
           {queueState.status === 'error' && <p role="alert">{queueState.message}</p>}
+          {leaveError !== null && <p role="alert">{leaveError}</p>}
         </fieldset>
       )}
     </section>

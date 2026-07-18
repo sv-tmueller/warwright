@@ -241,7 +241,7 @@ export type MatchResultEnvelope = {
   readonly seed: number;
   readonly hash: number;
   readonly winner: 'A' | 'B' | 'draw';
-  readonly eventLog: MatchEvent[];
+  readonly eventLog: readonly MatchEvent[];
 };
 
 function toMatchResultEnvelope(parsed: z.infer<typeof MatchResultEnvelopeSchema>): MatchResultEnvelope {
