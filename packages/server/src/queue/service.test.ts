@@ -42,6 +42,13 @@ describe('selectOpponent', () => {
     const candidates = [self, other];
     expect(selectOpponent(candidates, 'me', 1500)).toBe(other);
   });
+
+  it('picks Q (1600) over P (1200) for a joiner at the lazy default 1500 (the #57 sub-plan example)', () => {
+    const p = entry({ userId: 'p', rating: 1200, enqueuedAt: 1 });
+    const q = entry({ userId: 'q', rating: 1600, enqueuedAt: 2 });
+    const candidates = [p, q];
+    expect(selectOpponent(candidates, 'r', 1500)).toBe(q);
+  });
 });
 
 describe('QueueService', () => {
