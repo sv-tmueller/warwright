@@ -22,6 +22,12 @@ import json
 from pathlib import Path
 
 from warwright_gym.actions import OBS_ENCODING_VERSION, SKILL_CATALOG, decode_action, encode_action
+from warwright_gym.observation import (
+    OBS_SELF_FIELD_COUNT,
+    OBS_UNIT_FIELD_COUNT,
+    OBS_UNIT_ID_OFFSET,
+    compute_observation_length,
+)
 
 FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "protocol_golden.json"
 
@@ -76,3 +82,20 @@ def test_observation_vector_is_all_integers_and_the_declared_length():
         fixture["numAllies"] + fixture["numEnemies"]
     )
     assert len(vector) == expected_length
+
+
+def test_observation_layout_constants_match_the_fixture():
+    fixture = load_fixture()
+    assert OBS_SELF_FIELD_COUNT == fixture["selfFieldCount"]
+    assert OBS_UNIT_FIELD_COUNT == fixture["unitFieldCount"]
+
+
+def test_unit_id_offset_is_the_first_field_of_a_unit_block():
+    assert OBS_UNIT_ID_OFFSET == 0
+
+
+def test_compute_observation_length_matches_the_fixture_vector_length():
+    fixture = load_fixture()
+    observation = fixture["observation"]
+    length = compute_observation_length(fixture["numAllies"], fixture["numEnemies"])
+    assert length == observation["length"]
