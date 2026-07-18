@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import warbandA from '../../../../builds/warband-a.json' with { type: 'json' };
 import warbandB from '../../../../builds/warband-b.json' with { type: 'json' };
+import { EXTERNAL_BEHAVIOR_ID } from './constants.js';
 import { mulberry32 } from './prng.js';
 import { init } from './init.js';
 
@@ -123,6 +124,29 @@ describe('init', () => {
     expect(() => init(VERSION, SEED, badBuild, warbandB)).toThrow(
       'Unknown behavior id: not-a-real-behavior',
     );
+  });
+
+  it('does not throw on the external sentinel behaviorId, even though it is never registered', () => {
+    const externalBuild = structuredClone(warbandA);
+    externalBuild.units[0]!.behaviorId = EXTERNAL_BEHAVIOR_ID;
+
+    const world = init(VERSION, SEED, externalBuild, warbandB);
+
+    expect(world.units[0]?.behaviorId).toBe(EXTERNAL_BEHAVIOR_ID);
+  });
+
+  it('leaves match-start emit, unit construction order/ids, and rng creation unaffected by an external unit', () => {
+    const externalBuild = structuredClone(warbandA);
+    externalBuild.units[0]!.behaviorId = EXTERNAL_BEHAVIOR_ID;
+
+    const world = init(VERSION, SEED, externalBuild, warbandB);
+
+    expect(world.units.map((unit) => unit.id)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+    expect(world.eventLog).toHaveLength(1);
+    expect(world.eventLog[0]?.kind).toBe('match-start');
+
+    const freshRng = mulberry32(SEED);
+    expect(world.rng.next()).toEqual(freshRng.next());
   });
 
   it('is deterministic and draws nothing from rng', () => {

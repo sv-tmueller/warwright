@@ -17,3 +17,14 @@ export const ARENA_MAX_Y = 1000;
 // 5 minutes at 20 Hz. Bounds a non-terminating match with a `'draw'`; not
 // correctness-critical.
 export const MATCH_TICK_CAP = 6000;
+
+// Sentinel behaviorId consumed by stepTick's decide slot (see loop.ts) and
+// init's eager-validation skip (see init.ts): a unit built with this id
+// draws its Action from the `externalActions` map passed into
+// stepTick/SteppedTransport.step instead of a registered Behavior, and so
+// never draws rng in the decide slot. Defined here (not in stepped.ts, which
+// re-exports it) so loop.ts and init.ts can depend on it without a circular
+// import through stepped.ts, which itself imports both of them. Deliberately
+// excluded from index.ts's `behaviorIds`: it is not a selectable in-game
+// Behavior, only an injection seam for a future gym bridge.
+export const EXTERNAL_BEHAVIOR_ID = 'external';

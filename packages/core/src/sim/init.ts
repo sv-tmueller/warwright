@@ -2,6 +2,7 @@ import { parseWarband } from '../content/schemas.js';
 import type { UnitBuild } from '../content/schemas.js';
 import { createContentRegistry } from '../content/registry.js';
 import { createSeedRegistry } from './seed-registry.js';
+import { EXTERNAL_BEHAVIOR_ID } from './constants.js';
 import { mulberry32 } from './prng.js';
 import { emit } from './events.js';
 import type { SpawnInfo } from './events.js';
@@ -18,7 +19,12 @@ function buildUnit(
     registry.getSkill(skillId);
     return { skillId, cooldownRemaining: 0 };
   });
-  registry.getBehavior(build.behaviorId);
+  // Skip the eager lookup only for the external sentinel: those units draw
+  // their Action from stepTick's externalActions map, never a registered
+  // Behavior, so they legitimately have no entry in the registry.
+  if (build.behaviorId !== EXTERNAL_BEHAVIOR_ID) {
+    registry.getBehavior(build.behaviorId);
+  }
 
   return {
     id,

@@ -5,6 +5,7 @@ import type { Unit, WorldState } from './types.js';
 import type { Action, Behavior, UnitView, WorldView } from './behavior.js';
 import { createContentRegistry } from '../content/registry.js';
 import type { ContentRegistry } from '../content/registry.js';
+import { EXTERNAL_BEHAVIOR_ID } from './constants.js';
 import { checkWinner, stepTick } from './loop.js';
 
 function makeUnit(overrides: Partial<Unit> = {}): Unit {
@@ -474,5 +475,74 @@ describe('stepTick', () => {
     const registry = makeRegistry({ idle: () => idle });
 
     expect(stepTick(world, registry)).toBeNull();
+  });
+
+  describe('external action injection', () => {
+    it('applies the action from externalActions for a unit with the external sentinel behaviorId, never calling any registered behavior', () => {
+      const external = makeUnit({
+        id: 1,
+        behaviorId: EXTERNAL_BEHAVIOR_ID,
+        pos: { x: 0, y: 0 },
+        moveSpeed: 3,
+      });
+      const world = makeWorld([external]);
+      const registry = makeRegistry({
+        [EXTERNAL_BEHAVIOR_ID]: () => {
+          throw new Error('the registered behavior for the sentinel id must never be called');
+        },
+      });
+      const externalActions = new Map<number, Action>([[1, { kind: 'move', to: { x: 10, y: 0 } }]]);
+
+      stepTick(world, registry, externalActions);
+
+      expect(external.pos).toEqual({ x: 3, y: 0 });
+    });
+
+    it('draws zero rng in the decide slot for an external unit (noopRng throws on any call)', () => {
+      const external = makeUnit({ id: 1, behaviorId: EXTERNAL_BEHAVIOR_ID, pos: { x: 0, y: 0 } });
+      const world = makeWorld([external]);
+      const registry = makeRegistry({});
+      const externalActions = new Map<number, Action>([[1, idle]]);
+
+      expect(() => stepTick(world, registry, externalActions)).not.toThrow();
+    });
+
+    it('throws a clear error when a living external unit has no entry in externalActions', () => {
+      const external = makeUnit({ id: 1, behaviorId: EXTERNAL_BEHAVIOR_ID });
+      const world = makeWorld([external]);
+      const registry = makeRegistry({});
+
+      expect(() => stepTick(world, registry, new Map())).toThrow(/external/i);
+      expect(() => stepTick(world, registry, undefined)).toThrow(/external/i);
+    });
+
+    it('does not require an externalActions entry for a dead external unit', () => {
+      const deadExternal = makeUnit({ id: 1, behaviorId: EXTERNAL_BEHAVIOR_ID, hp: 0 });
+      const alive = makeUnit({ id: 2, team: 'B', behaviorId: 'idle' });
+      const world = makeWorld([deadExternal, alive]);
+      const registry = makeRegistry({ idle: () => idle });
+
+      expect(() => stepTick(world, registry, new Map())).not.toThrow();
+    });
+
+    it('leaves non-external units on the same tick deciding via their registered behavior as usual', () => {
+      const external = makeUnit({ id: 1, behaviorId: EXTERNAL_BEHAVIOR_ID, pos: { x: 0, y: 0 } });
+      const scripted = makeUnit({
+        id: 2,
+        team: 'B',
+        behaviorId: 'mover',
+        pos: { x: 0, y: 0 },
+        moveSpeed: 3,
+      });
+      const world = makeWorld([external, scripted]);
+      const registry = makeRegistry({
+        mover: () => ({ kind: 'move', to: { x: 10, y: 0 } }),
+      });
+      const externalActions = new Map<number, Action>([[1, idle]]);
+
+      stepTick(world, registry, externalActions);
+
+      expect(scripted.pos).toEqual({ x: 3, y: 0 });
+    });
   });
 });

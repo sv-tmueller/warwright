@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { behaviorIds, roles, skills } from './index.js';
+import { behaviorIds, createSteppedMatch, EXTERNAL_BEHAVIOR_ID, roles, skills } from './index.js';
 
 describe('@warwright/core', () => {
   it('loads the package', () => {
@@ -23,5 +23,14 @@ describe('@warwright/core', () => {
 
   it('exposes the seed behavior id enumeration', () => {
     expect(behaviorIds).toEqual(['aggro-lowest-hp', 'protect-allies', 'focus-casters']);
+  });
+
+  it('excludes the external sentinel from the public behaviorIds enumeration', () => {
+    expect(behaviorIds).not.toContain(EXTERNAL_BEHAVIOR_ID);
+  });
+
+  it('exposes the external sentinel id and the stepped-match factory', () => {
+    expect(EXTERNAL_BEHAVIOR_ID).toBe('external');
+    expect(typeof createSteppedMatch).toBe('function');
   });
 });

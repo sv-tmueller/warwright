@@ -1,9 +1,12 @@
 import { aggroLowestHp, focusCasters, protectAllies } from './content/behaviors/index.js';
 
 export { runMatch } from './sim/match.js';
-export type { MatchResult, RunMatch, Winner } from './sim/types.js';
+export type { MatchResult, RunMatch, Winner, WorldState } from './sim/types.js';
 export type { MatchEvent } from './sim/events.js';
+export type { Action } from './sim/behavior.js';
 export { RULESET_VERSION } from './sim/constants.js';
+export { createSteppedMatch, EXTERNAL_BEHAVIOR_ID } from './sim/stepped.js';
+export type { Replay, SteppedTransport } from './api/seams.js';
 export { parseWarband, WarbandSchema } from './content/schemas.js';
 export type { Role, Skill, UnitBuild, Warband } from './content/schemas.js';
 export { roles } from './content/data/roles.js';

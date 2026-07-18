@@ -1,30 +1,16 @@
 import { MATCH_TICK_CAP } from './constants.js';
-import { emit } from './events.js';
-import { hashEventLog } from './hash.js';
-import { init } from './init.js';
-import { stepTick } from './loop.js';
-import { createSeedRegistry } from './seed-registry.js';
-import type { MatchResult, RunMatch, Winner } from './types.js';
+import { createSteppedMatch } from './stepped.js';
+import type { RunMatch } from './types.js';
 
-export const runMatch: RunMatch = ({ version, seed, buildA, buildB }) => {
-  const world = init(version, seed, buildA, buildB);
-  const registry = createSeedRegistry();
-
-  let winner: Winner | null = null;
-  while (world.tick < MATCH_TICK_CAP) {
-    winner = stepTick(world, registry);
-    if (winner !== null) break;
-  }
-
-  const finalWinner: Winner = winner ?? 'draw';
-  emit(world.eventLog, { kind: 'match-end', tick: world.tick, winner: finalWinner });
-
-  const result: MatchResult = {
-    version,
-    seed,
-    winner: finalWinner,
-    eventLog: world.eventLog,
-    hash: hashEventLog(world.eventLog),
-  };
-  return result;
+// Re-expressed over the stepped seam (see stepped.ts): a single
+// step(MATCH_TICK_CAP) call reproduces the exact former while-loop
+// tick-cap/break-on-winner condition (stepTick pre-increments tick, so the
+// budget is identical), and the wrapper's one-time finalize() reproduces
+// the former inline match-end emit + hashEventLog. No externalActions are
+// ever passed, so every unit still decides via its registered Behavior —
+// bit-identical to the previous inline implementation.
+export const runMatch: RunMatch = (replay) => {
+  const match = createSteppedMatch(replay);
+  match.step(MATCH_TICK_CAP);
+  return match.result();
 };
