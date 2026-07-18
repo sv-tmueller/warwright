@@ -8,6 +8,7 @@ import { loadWarband } from './persistence.js';
 import { resolveSetup, type ResolveSourceDeps, type WarbandSource } from './match-setup.js';
 import { MatchSetup, type UploadedFile } from './MatchSetup.js';
 import { MatchPlayback } from './MatchPlayback.js';
+import { lastTickOf } from './playback.js';
 
 const DEFAULT_SEED = '42';
 
@@ -27,11 +28,6 @@ type MatchState = {
   readonly buildAName: string;
   readonly buildBName: string;
 };
-
-function lastTickOf(log: readonly MatchEvent[]): number {
-  const lastEvent = log[log.length - 1];
-  return lastEvent ? lastEvent.tick : 0;
-}
 
 function runMatchState(key: number, seed: number, buildA: Warband, buildB: Warband): MatchState {
   const { eventLog } = runClientMatch(seed, buildA, buildB);

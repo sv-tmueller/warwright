@@ -9,9 +9,19 @@
  * displayed tick is `clamp(floor(accumulatorMs / MS_PER_TICK), 0, lastTick)`.
  */
 
+import type { MatchEvent } from '@warwright/core';
+
 export const MS_PER_TICK = 1000 / 20;
 export const MIN_SPEED = 0.25;
 export const MAX_SPEED = 4;
+
+// Extracted verbatim out of MatchViewer (see the sub-plan on issue #59) so
+// online-flow.ts can derive the same `lastTick` from a server-resolved
+// match's event log without duplicating this one-liner.
+export function lastTickOf(log: readonly MatchEvent[]): number {
+  const lastEvent = log[log.length - 1];
+  return lastEvent ? lastEvent.tick : 0;
+}
 
 export type PlaybackStatus = 'playing' | 'paused';
 
