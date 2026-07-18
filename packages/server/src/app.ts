@@ -8,6 +8,7 @@ import {
 import type { Pool } from 'pg';
 import authRoutes from './auth/routes.js';
 import type { Database } from './db/client.js';
+import matchRoutes from './matches/routes.js';
 import sessionPlugin from './plugins/session.js';
 import queueRoutes from './queue/routes.js';
 import ratingRoutes from './ratings/routes.js';
@@ -41,7 +42,8 @@ export interface BuildAppOptions {
  * registered when a database is supplied. The session/CSRF plugin and the
  * /auth/*, /warbands*, /queue, and /leaderboard routes are only registered
  * when db, pool, and session are all supplied, mirroring /readyz's
- * DB-free-test gating.
+ * DB-free-test gating. /matches* joins that same block, mirroring queue's
+ * and rating's registration.
  */
 export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   const app = Fastify({ bodyLimit: BODY_LIMIT_BYTES }).withTypeProvider<ZodTypeProvider>();
@@ -71,6 +73,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     void app.register(warbandRoutes, { db });
     void app.register(queueRoutes, { db });
     void app.register(ratingRoutes, { db });
+    void app.register(matchRoutes, { db });
   }
 
   return app;
