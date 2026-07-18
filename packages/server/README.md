@@ -2,7 +2,7 @@
 
 Fastify + PostgreSQL/Drizzle scaffold for Warwright's authoritative server (Phase 2). Depends on `@warwright/core` directly and never re-implements combat or content rules; it wraps the core.
 
-Auth (register/login/logout/session lifecycle, CSRF, rate limiting) landed in #55. Warband persistence (#56) is below. Matchmaking and match-resolution routes are still to come (#57-#58).
+Auth (register/login/logout/session lifecycle, CSRF, rate limiting) landed in #55. Warband persistence (#56) is below. The authoritative match-resolution primitive (#103, below) landed as a callable module with no HTTP endpoint; the matchmaking queue endpoint that calls it, plus ratings/history, are still to come (#57/#58).
 
 ## Environment variables
 
@@ -84,13 +84,17 @@ Endpoints (all under `/warbands`, all requiring an authenticated session — 401
 
 `POST`, `PUT`, and `DELETE` additionally require a valid CSRF token (the `csrf-token` header, matching the caller's session) — 403 otherwise, exactly like the mutating `/auth/*` routes. Request bodies are capped at the same 64 KiB limit (413 above it).
 
+## Match resolution
+
+`resolveMatch` (`src/matches/resolve.ts`) is the authoritative match-resolution primitive: a plain async function, not an HTTP route — the matchmaking queue endpoint that will call it is a later slice. Given two build snapshots and a userA/userB pair, it re-validates both builds with core's `parseWarband` (fail-loud), chooses a seed (a `node:crypto` CSPRNG draw in `[0, 2^32)` by default, or a caller-supplied integer in that same range), pins the current `RULESET_VERSION`, calls `core.runMatch` unchanged, and persists one immutable row to `matches` (the canonical `parseWarband` output, not the raw input — so a later edit to the source warband via the `/warbands` routes never touches an already-resolved match). Resolution happens before the insert, so a validation or seed failure persists nothing. It returns `{ matchId, result }`, where `result` is core's full `MatchResult` (winner, event log, hash).
+
 ## Tests
 
 ```bash
 pnpm --filter @warwright/server test
 ```
 
-DB-gated tests (`src/db/migrations.test.ts`, `src/app.readyz.test.ts`, `src/plugins/session.test.ts`, `src/auth/auth.test.ts`, `src/auth/ratelimit.test.ts`, `src/warbands/warbands.test.ts`) skip gracefully when `DATABASE_URL` is unset locally, and are mandatory in CI (a `services:` Postgres block; the tests throw if `CI` is set without `DATABASE_URL`, so they can never silently skip there). The test script runs with `--no-file-parallelism`: several DB-gated suites share the same Postgres schema, and `migrations.test.ts` drops and recreates it, so test files must run sequentially rather than racing each other.
+DB-gated tests (`src/db/migrations.test.ts`, `src/app.readyz.test.ts`, `src/plugins/session.test.ts`, `src/auth/auth.test.ts`, `src/auth/ratelimit.test.ts`, `src/warbands/warbands.test.ts`, `src/matches/resolve.test.ts`) skip gracefully when `DATABASE_URL` is unset locally, and are mandatory in CI (a `services:` Postgres block; the tests throw if `CI` is set without `DATABASE_URL`, so they can never silently skip there). The test script runs with `--no-file-parallelism`: several DB-gated suites share the same Postgres schema, and `migrations.test.ts` drops and recreates it, so test files must run sequentially rather than racing each other.
 
 ## Docker
 
