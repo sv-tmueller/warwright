@@ -6,6 +6,7 @@ import { z } from 'zod';
 import type { Database } from '../db/client.js';
 import { DEFAULT_RATING, ratings, warbands } from '../db/schema.js';
 import { resolveMatch } from '../matches/resolve.js';
+import { MatchResultResponseSchema } from '../matches/schemas.js';
 import { applyMatchRatings } from '../ratings/service.js';
 import { createQueueService } from './service.js';
 
@@ -22,21 +23,6 @@ const GENERIC_RESOLVING = { error: 'Match currently resolving' } as const;
 const ErrorSchema = z.object({ error: z.string() });
 
 const EnqueueBodySchema = z.object({ warbandId: z.uuid() });
-
-// Shallow, server-local mirror of core's MatchResult, not a re-export of a
-// core schema (core exports no MatchResultSchema — MatchResult is produced
-// in-process by core's typed runMatch via resolveMatch, not external data;
-// see the #57 sub-plan's endpoint-contract decision). eventLog entries are
-// validated only as passthrough objects: their exact shape is core's
-// MatchEvent union, an implementation detail this response contract
-// intentionally doesn't duplicate.
-const MatchResultResponseSchema = z.object({
-  version: z.number().int(),
-  seed: z.number().int(),
-  hash: z.number().int(),
-  winner: z.enum(['A', 'B', 'draw']),
-  eventLog: z.array(z.looseObject({})),
-});
 
 const WaitingResponseSchema = z.object({ status: z.literal('waiting') });
 const IdleResponseSchema = z.object({ status: z.literal('idle') });
