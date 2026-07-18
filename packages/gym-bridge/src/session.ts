@@ -65,11 +65,18 @@ const CommandSchema = z.discriminatedUnion('cmd', [
 type ResetCommand = z.infer<typeof ResetCommandSchema>;
 type StepCommand = z.infer<typeof StepCommandSchema>;
 
+// Wire-shape terminal result: winner/hash only, per the #63 SUB_PLAN wire
+// spec (`result?:{winner,hash}`). Deliberately NOT the full MatchResult --
+// that also carries the complete eventLog, which would bloat every batched
+// "done" frame and works against the stdio-backpressure risk the SUB_PLAN
+// flags. Callers that need the full log call the core directly.
+type WireResult = Pick<MatchResult, 'winner' | 'hash'>;
+
 type EnvFrame = {
   envId: number;
   obs: Record<string, number[]>;
   done: boolean;
-  result?: MatchResult;
+  result?: WireResult;
 };
 
 export type Session = {
@@ -107,9 +114,10 @@ export function createSession(): Session {
       }
     }
     const done = transport.done();
-    return done
-      ? { envId, obs, done, result: transport.result() }
-      : { envId, obs, done };
+    if (!done) return { envId, obs, done };
+
+    const { winner, hash } = transport.result();
+    return { envId, obs, done, result: { winner, hash } };
   }
 
   function decodeActionsRecord(
