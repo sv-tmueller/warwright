@@ -1,5 +1,6 @@
 import type { ContentRegistry } from '../content/registry.js';
 import type { Action, UnitView, WorldView } from './behavior.js';
+import { EXTERNAL_BEHAVIOR_ID } from './constants.js';
 import { emit } from './events.js';
 import { applyActiveDots, resolveAttack, tickCooldowns } from './resolve/combat.js';
 import { isInRange } from './resolve/geometry.js';
@@ -104,15 +105,32 @@ export function checkWinner(units: readonly Unit[]): Winner | null {
   return 'draw';
 }
 
-export function stepTick(world: WorldState, registry: ContentRegistry): Winner | null {
+export function stepTick(
+  world: WorldState,
+  registry: ContentRegistry,
+  externalActions?: ReadonlyMap<number, Action>,
+): Winner | null {
   world.tick += 1;
   const tick = world.tick;
   const worldView = buildWorldView(world.units);
 
   for (const unit of world.units) {
     if (unit.hp <= 0) continue;
-    const behavior = registry.getBehavior(unit.behaviorId);
-    const action = behavior.decide(toUnitView(unit), worldView, world.rng);
+
+    let action: Action;
+    if (unit.behaviorId === EXTERNAL_BEHAVIOR_ID) {
+      const injected = externalActions?.get(unit.id);
+      if (!injected) {
+        throw new Error(
+          `stepTick: no external action supplied for living external unit ${unit.id}`,
+        );
+      }
+      action = injected;
+    } else {
+      const behavior = registry.getBehavior(unit.behaviorId);
+      action = behavior.decide(toUnitView(unit), worldView, world.rng);
+    }
+
     applyAction(world, registry, unit, action, tick);
   }
 
