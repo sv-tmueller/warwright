@@ -46,6 +46,14 @@ export interface MatchRunner {
 // > 1, the same `actions` map is replayed on every tick advanced by the
 // call (action-repeat) — callers that want per-tick actions call `step(1)`
 // in a loop.
+//
+// WARNING (load-bearing): `reset`/`step` return the engine's LIVE MUTABLE
+// `WorldState`, not a copy. Callers (the #63 gym bridge) MUST treat it as
+// read-only and derive observations from it only; mutating it would
+// silently corrupt determinism (the same instance backs subsequent ticks).
+// Also: if `step` throws because a living external unit had no entry in
+// `actions`, the transport is left mid-tick and MUST NOT be reused as-is —
+// call `reset()` before stepping again to get a usable instance.
 export interface SteppedTransport {
   reset(replay: Replay): WorldState;
   step(ticks: number, actions?: ReadonlyMap<number, Action>): WorldState;

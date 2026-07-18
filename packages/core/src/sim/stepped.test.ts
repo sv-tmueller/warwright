@@ -95,12 +95,22 @@ describe('createSteppedMatch', () => {
       const match = createSteppedMatch(eliminationReplay);
       match.step(MATCH_TICK_CAP);
       const first = match.result();
+      // Snapshot the finalized state BEFORE the post-done step() calls below,
+      // so the assertions compare against an independent copy rather than
+      // the same cached MatchResult reference (which would trivially pass
+      // even if a regression let stepTick run after done).
+      const beforePostDoneSteps = structuredClone(first);
 
       match.step(1);
       match.step(50);
       const second = match.result();
 
-      expect(second).toEqual(first);
+      expect(second).toEqual(beforePostDoneSteps);
+      expect(second.eventLog).toHaveLength(beforePostDoneSteps.eventLog.length);
+      expect(second.winner).toBe(beforePostDoneSteps.winner);
+      expect(second.hash).toBe(beforePostDoneSteps.hash);
+      // No trailing `tick` (or any other) events leaked from the post-done
+      // step() calls.
       const matchEndEvents = second.eventLog.filter((event) => event.kind === 'match-end');
       expect(matchEndEvents).toHaveLength(1);
     });
