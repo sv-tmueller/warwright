@@ -1,4 +1,5 @@
 import type { RunMatch, MatchResult, WorldState } from '../sim/types.js';
+import type { Action } from '../sim/behavior.js';
 
 // The replay tuple that fully reproduces a match: a ruleset version, a PRNG
 // seed, and the two snapshotted builds. `buildA`/`buildB` stay `unknown`
@@ -27,16 +28,27 @@ export interface MatchRunner {
 // the match terminates. `result` gives the `MatchResult` (terminal
 // `winner`/`hash`) once `done` is true.
 //
-// Two grounding facts: (a) observations/rewards are derived by the trainer
-// FROM `WorldState`/`MatchResult` — this seam exposes engine state only, no
-// ML shaping; (b) there is no per-tick action argument — units carry
-// `behaviorId` in `WorldState`, so the core steps autonomously and learned
-// policies are Behaviors baked into the build. Batching is achieved by a
-// bridge running N instances of this single-match transport; arrays/batch
-// surface are not baked into this interface.
+// Grounding fact (a): observations/rewards are derived by the trainer FROM
+// `WorldState`/`MatchResult` — this seam exposes engine state only, no ML
+// shaping. Batching is achieved by a bridge running N instances of this
+// single-match transport; arrays/batch surface are not baked into this
+// interface.
+//
+// Grounding fact (b) is SUPERSEDED (see #119, landed in #121): units still
+// carry `behaviorId` in `WorldState` and decide autonomously by default via
+// their registered Behavior, BUT `step`'s optional `actions` param is the
+// injection contract for a learned/external policy under training. An
+// entry in `actions` is consulted ONLY for a unit whose `behaviorId` is the
+// `'external'` sentinel (`EXTERNAL_BEHAVIOR_ID`, exported by
+// `sim/stepped.ts`); every other unit still decides via its registered
+// Behavior, unaffected. A living external unit with no entry in `actions`
+// is a caller bug and throws loud rather than silently idling. When `ticks`
+// > 1, the same `actions` map is replayed on every tick advanced by the
+// call (action-repeat) — callers that want per-tick actions call `step(1)`
+// in a loop.
 export interface SteppedTransport {
   reset(replay: Replay): WorldState;
-  step(ticks: number): WorldState;
+  step(ticks: number, actions?: ReadonlyMap<number, Action>): WorldState;
   done(): boolean;
   result(): MatchResult;
 }
