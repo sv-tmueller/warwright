@@ -6,6 +6,7 @@ import { z } from 'zod';
 import type { Database } from '../db/client.js';
 import { DEFAULT_RATING, ratings, warbands } from '../db/schema.js';
 import { resolveMatch } from '../matches/resolve.js';
+import { applyMatchRatings } from '../ratings/service.js';
 import { createQueueService } from './service.js';
 
 export interface QueueRoutesOptions {
@@ -132,19 +133,36 @@ const queueRoutes: FastifyPluginAsyncZod<QueueRoutesOptions> = async (app, optio
       // already been synchronously removed from the queue. Never forwards
       // a client-supplied seed or winner — resolveMatch draws its own
       // seed and computes its own winner.
+      let matchId: string;
+      let result: Awaited<ReturnType<typeof resolveMatch>>['result'];
       try {
-        const { matchId, result } = await resolveMatch(db, {
+        ({ matchId, result } = await resolveMatch(db, {
           userAId: outcome.pairing.userAId,
           userBId: outcome.pairing.userBId,
           buildA: outcome.pairing.buildA,
           buildB: outcome.pairing.buildB,
-        });
+        }));
         queueService.completePairing(outcome.pairing, matchId, result);
-        return { status: 'matched' as const, matchId, result };
       } catch (error) {
         queueService.failPairing(outcome.pairing);
         throw error;
       }
+
+      // Rating is deliberately outside the resolve try/catch and in its own
+      // try/catch: a failed rating write must never 500 an already-
+      // completed, already-persisted match or corrupt queue state (the
+      // pairing above has already succeeded). A failure here leaves
+      // matches.rated_at null — an auditable "never rated" marker, not
+      // silently swallowed. Respects the no-await invariant documented on
+      // QueueService: this await happens after enqueue() has already
+      // returned 'paired', same as resolveMatch above.
+      try {
+        await applyMatchRatings(db, matchId);
+      } catch (error) {
+        app.log.error({ err: error, matchId }, 'applyMatchRatings failed; match left unrated');
+      }
+
+      return { status: 'matched' as const, matchId, result };
     }
   );
 
