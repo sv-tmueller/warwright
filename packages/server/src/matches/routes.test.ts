@@ -271,6 +271,35 @@ describe.skipIf(!url)('match routes', () => {
     await app.close();
   });
 
+  it('GET /matches/:id/replay: a tampered result_hash under a matching ruleset version 500s (fail loud)', async () => {
+    const app = buildTestApp();
+    const userA = await registerUser(app);
+    const userB = await registerUser(app);
+
+    const { matchId } = await resolveMatch(db, {
+      userAId: userA.id,
+      userBId: userB.id,
+      buildA: warbandA,
+      buildB: warbandB,
+      seed: 207,
+    });
+    await tamperResultHash(matchId);
+    vi.mocked(runMatch).mockClear();
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/matches/${matchId}/replay`,
+      headers: { cookie: userA.cookie },
+    });
+    expect(response.statusCode).toBe(500);
+    // Proves the 500 came from the post-re-run hash-mismatch check (the
+    // version gate passed, since ruleset_version was left untouched), not
+    // from the version gate itself.
+    expect(runMatch).toHaveBeenCalledTimes(1);
+
+    await app.close();
+  });
+
   it('GET /matches/:id/verify and /replay: a bumped ruleset_version 409s on both, refusing BEFORE any re-run', async () => {
     const app = buildTestApp();
     const userA = await registerUser(app);
