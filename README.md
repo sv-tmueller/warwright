@@ -59,7 +59,28 @@ All default art is procedural, drawn on canvas at runtime from role and skill id
 
 ### Server
 
-`packages/server` is the Phase 2 authoritative service scaffold: a Fastify app over PostgreSQL/Drizzle that depends on `@warwright/core` directly and never re-implements combat or content rules. See [`packages/server/README.md`](packages/server/README.md) for environment variables, the local Postgres docker-compose setup, migrations, and running the server. This slice ships no product endpoints; auth, warband CRUD, match resolution, and ratings land in later slices.
+`packages/server` is the Phase 2 authoritative service: a Fastify app over PostgreSQL/Drizzle that depends on `@warwright/core` directly and never re-implements combat or content rules. See [`packages/server/README.md`](packages/server/README.md) for environment variables, the local Postgres docker-compose setup, migrations, and running the server, and for the auth, warband, and matchmaking-queue endpoints themselves.
+
+### Online mode
+
+The browser sandbox also has an **Online** tab (next to **Offline**, which is the match viewer and warband builder above, unchanged) for playing against the authoritative server: register or log in, save the warband builder's draft to your account, pick a saved warband, and join the matchmaking queue. A match is resolved entirely server-side and replayed through the exact same `MatchPlayback` component the offline viewer uses — the client never calls `runMatch`/`runClientMatch` for an online match.
+
+To try it locally, run the server and the web dev server side by side:
+
+```bash
+# from the repo root, once: start Postgres and the server (see
+# packages/server/README.md for DATABASE_URL / SESSION_SECRET)
+docker compose up -d
+export DATABASE_URL=postgresql://postgres:postgres@localhost:5433/warwright
+export SESSION_SECRET=$(openssl rand -hex 32)
+pnpm --filter @warwright/server db:migrate
+pnpm --filter @warwright/server dev
+
+# in a second terminal: the web dev server
+pnpm dev
+```
+
+Open the Vite dev server's URL and switch to the **Online** tab. `packages/web/vite.config.ts` proxies `/auth`, `/warbands`, and `/queue` to `http://localhost:3000` (the server's default port), so the client's relative URLs (`api-client.ts` never hardcodes a base URL) stay same-origin in dev — cookie sessions and the CSRF header work with no server-side CORS configuration. Production is expected to serve the web bundle and the API from the same origin (the server serving `packages/web/dist`, or a reverse proxy fronting both); a cross-origin deployment is a separate, out-of-scope server change.
 
 ## Build plan
 

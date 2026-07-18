@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import type { MatchEvent } from '@warwright/core';
 import warbandA from '../../../builds/warband-a.json' with { type: 'json' };
 import warbandB from '../../../builds/warband-b.json' with { type: 'json' };
 import { runClientMatch } from './match-runner.js';
 import { deriveFrame } from './frame-state.js';
 import {
   createInitialPlaybackState,
+  lastTickOf,
   playback,
   MS_PER_TICK,
   MIN_SPEED,
@@ -16,6 +18,20 @@ const LAST_TICK = 10;
 function initial(lastTick = LAST_TICK) {
   return createInitialPlaybackState(lastTick);
 }
+
+describe('lastTickOf', () => {
+  it('returns the tick of the final event', () => {
+    const log: MatchEvent[] = [
+      { kind: 'tick', tick: 0 },
+      { kind: 'tick', tick: 7 },
+    ];
+    expect(lastTickOf(log)).toBe(7);
+  });
+
+  it('returns 0 for an empty log', () => {
+    expect(lastTickOf([])).toBe(0);
+  });
+});
 
 describe('createInitialPlaybackState', () => {
   it('starts paused at tick 0 with speed 1 and no accumulated time', () => {
