@@ -200,6 +200,88 @@ every tick should construct the env with `ticks_per_step=1` and call
   `truncated` is always `False`: `WarwrightVectorEnv` never imposes its own
   episode length limit.
 
+## Featurization (`warwright_gym.featurize`, #127)
+
+`warwright_gym.featurize.featurize` is a **stateless** `int64 -> float32`
+map applied inside the training/eval loop, as part of the **policy**
+contract -- it is **not** an env or wrapper transformation.
+`RewardShapingWrapper` (see below) always sees the **raw** integer
+observation the bridge produced, so its hp-delta math stays exact; a caller
+that wants network-ready features calls `featurize()` itself, downstream of
+any reward wrapper.
+
+Every index of the raw observation vector is scaled by a **fixed,
+field-class-specific power-of-two divisor**, derived purely from this
+document's layout constants (never a hardcoded magic layout):
+
+| Field class | Fields | Divisor |
+|---|---|---|
+| `HP` | self/unit `hp`, `maxHp` | `1024` |
+| `POS` | self/unit `x`, `y` | `1024` |
+| `COOLDOWN` | self `attackCooldownRemaining`, self per-skill `cooldownRemaining` | `64` |
+| `DISTANCE_SQUARED` | unit block's squared distance to self | `2**21` |
+| `ID` | unit block's `id` | `1` (unscaled -- see note below) |
+
+The `-1` (`SKILL_COOLDOWN_ABSENT`) sentinel in a `COOLDOWN`-class slot is
+**passed through unchanged**, never divided.
+
+The unit `id` field is not a magnitude value (there's no meaningful min/max
+to normalize against); it's passed through unscaled purely to keep the
+output vector's shape and index alignment identical to the raw
+observation. A policy should not treat it as a meaningful numeric feature.
+
+**Power-of-two divisors are mandatory** and deliberate: dividing an integer
+by a power of two is an exact binary-floating-point operation (for any
+magnitude this repo's fields take), so a future float64 TypeScript
+inference Behavior (#66, exported policy weights running inside the core
+per `CLAUDE.md`'s "Content, learned behaviors, and cosmetics") can
+reproduce this exact map **bit-for-bit** at float64 precision. **Never**
+change a divisor to a non-power-of-two value, and **never** replace this
+with a running-statistics (mean/variance) normalizer -- a stateful
+normalizer is both a determinism hazard (its state would have to be
+exported and replayed identically) and an export hazard for #66's
+pure-function inference contract.
+
+`#66` must mirror `HP_DIVISOR` / `POS_DIVISOR` / `COOLDOWN_DIVISOR` /
+`DISTANCE_SQUARED_DIVISOR` and the field-class-per-index derivation above
+exactly.
+
+## Reward shaping (`warwright_gym.rewards`, #127)
+
+`RewardShapingWrapper` is a `gymnasium.vector.VectorWrapper` around
+`WarwrightVectorEnv` (or any vector env producing the same raw observation
+layout). It reads **only** two signal sources, both already emitted by the
+wrapped env -- it never re-implements a rule:
+
+- **Terminal**: `info["winner"]` on a sub-env's terminal frame (`"A"` ->
+  `win_reward`, `"B"` -> `loss_reward`, `"draw"` -> `draw_reward`; the
+  trainable agent is always team A per `WarwrightVectorEnv._validate_builds`).
+- **Shaping**: integer hp deltas between consecutive **raw** int64
+  observations, read at the `OBS_UNIT_HP_OFFSET` / `OBS_SELF_HP_INDEX`
+  layout offsets (allies-then-enemies block order). Hp is clamped at `0`
+  before differencing (overkill never counts as extra damage). Each term is
+  normalized by that team's total `maxHp`, read once from the first reset
+  frame.
+
+This hp-delta shaping is **potential-based** (Ng, Harada & Russell 1999):
+define `Φ(s) = ally_hp_weight * team_hp(s)/team_max_hp - damage_dealt_weight
+* enemy_hp(s)/enemy_max_hp`; the shaping reward paid on a transition is
+exactly `Φ(s') - Φ(s)`, which does not change which policy is optimal.
+
+**Autoreset boundary**: `WarwrightVectorEnv` autoresets a sub-env
+(`AutoresetMode.NEXT_STEP`) on the step *after* it reaches `done` -- that
+next frame is a fresh, full-hp reset frame, not a real transition from the
+prior terminal frame. `RewardShapingWrapper` tracks `terminated` per
+sub-env from the previous `step()` call; on a frame where that was set, the
+shaping reward is `0.0` and `prev_obs` is re-baselined from the fresh frame
+instead of diffed against the stale terminal frame. `reset()` always
+re-baselines `prev_obs` too.
+
+`RewardConfig` is a frozen, `dataclasses.asdict`-serializable dataclass
+(`win_reward`, `loss_reward`, `draw_reward`, `damage_dealt_weight`,
+`ally_hp_weight`, and one `enable_*` toggle per term) so a run report can
+embed the exact shaping configuration a policy was trained under.
+
 ## Cross-references
 
 - `packages/core/src/sim/observation.ts` -- the authoritative encoder/
@@ -213,3 +295,5 @@ every tick should construct the env with `ticks_per_step=1` and call
   math).
 - `warwright_gym/actions.py` -- the action-kind code mirror.
 - `warwright_gym/env.py` -- this encoding, wired into Gymnasium spaces.
+- `warwright_gym/featurize.py` -- the int64->float32 featurization map (#127).
+- `warwright_gym/rewards.py` -- `RewardConfig` and `RewardShapingWrapper` (#127).
