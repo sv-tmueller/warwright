@@ -9,6 +9,7 @@ check.
 from __future__ import annotations
 
 import numpy as np
+import torch
 
 from warwright_gym.actions import ACTION_KIND_ATTACK, ACTION_KIND_MOVE_TOWARD
 from warwright_gym.observation import (
@@ -22,8 +23,10 @@ from warwright_gym.training.evaluate import (
     EVAL_SEED_BASE,
     EvalResult,
     HeuristicPolicy,
+    TorchPolicyAdapter,
     evaluate,
 )
+from warwright_gym.training.policy import ActorCriticPolicy
 
 NUM_ALLIES = 0
 NUM_ENEMIES = 2
@@ -196,3 +199,34 @@ def test_evaluate_computes_win_rate_over_all_recorded_winners():
     assert result.losses == 1
     assert result.draws == 1
     assert result.win_rate == 0.5
+
+
+# --- TorchPolicyAdapter --------------------------------------------------
+
+
+def test_torch_policy_adapter_returns_wire_shaped_actions_within_bounds():
+    nvec = [5, 2, 6, 1001, 1001]
+    torch.manual_seed(0)
+    policy = ActorCriticPolicy(obs_dim=LENGTH, nvec=nvec)
+    adapter = TorchPolicyAdapter(policy)
+    obs = np.random.default_rng(0).integers(0, 500, size=(3, LENGTH)).astype(np.int64)
+
+    actions = adapter.act(obs)
+
+    assert actions.shape == (3, 5)
+    assert actions.dtype == np.int64
+    for component, bound in enumerate(nvec):
+        assert actions[:, component].min() >= 0
+        assert actions[:, component].max() < bound
+
+
+def test_torch_policy_adapter_is_deterministic_across_calls():
+    torch.manual_seed(1)
+    policy = ActorCriticPolicy(obs_dim=LENGTH, nvec=[5, 2, 6, 1001, 1001])
+    adapter = TorchPolicyAdapter(policy)
+    obs = np.random.default_rng(1).integers(0, 500, size=(3, LENGTH)).astype(np.int64)
+
+    first = adapter.act(obs)
+    second = adapter.act(obs)
+
+    assert np.array_equal(first, second)

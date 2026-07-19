@@ -346,10 +346,12 @@ def train(
     num_updates = max(1, config.total_timesteps // steps_per_rollout)
 
     last_losses: dict[str, float] = {}
+    total_reward_sum = 0.0
     for _update in range(num_updates):
         buffer, obs, pending_reset = collect_rollout(
             env, policy, config.num_steps, obs, pending_reset
         )
+        total_reward_sum += float(buffer.rewards[buffer.valid].sum().item())
         with torch.no_grad():
             last_value = policy.value(torch.as_tensor(featurize(obs), dtype=torch.float32))
         advantages, returns = compute_gae(
@@ -362,4 +364,5 @@ def train(
         )
         last_losses = ppo_update(policy, optimizer, buffer, advantages, returns, config)
 
+    last_losses["total_reward_sum"] = total_reward_sum
     return policy, last_losses

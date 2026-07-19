@@ -28,17 +28,22 @@ exact values.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 import numpy as np
+import torch
 
 from warwright_gym.actions import ACTION_KIND_ATTACK, ACTION_KIND_MOVE_TOWARD
+from warwright_gym.featurize import featurize
 from warwright_gym.observation import (
     OBS_SELF_FIELD_COUNT,
     OBS_UNIT_DISTANCE_SQUARED_OFFSET,
     OBS_UNIT_FIELD_COUNT,
     OBS_UNIT_HP_OFFSET,
 )
+
+if TYPE_CHECKING:
+    from warwright_gym.training.policy import ActorCriticPolicy
 
 EVAL_BATCH_SIZE = 16
 EVAL_NUM_BATCHES = 4
@@ -125,6 +130,25 @@ class HeuristicPolicy:
             )
             actions[env_id] = [kind, best_slot, 0, 0, 0]
         return actions
+
+
+class TorchPolicyAdapter:
+    """Adapts an `ActorCriticPolicy` to `ActionPolicy`: applies
+    `warwright_gym.featurize.featurize` to the raw int64 observation (the
+    policy's input contract -- see featurize.py's docstring) and always
+    acts DETERMINISTICALLY (argmax per component), per the #65 SUB_PLAN's
+    eval protocol."""
+
+    def __init__(self, policy: ActorCriticPolicy) -> None:
+        self._policy = policy
+
+    def act(self, obs: np.ndarray) -> np.ndarray:
+        features = featurize(obs)
+        with torch.no_grad():
+            actions, _log_prob, _entropy, _value = self._policy.act(
+                torch.as_tensor(features, dtype=torch.float32), deterministic=True
+            )
+        return actions.numpy().astype(np.int64)
 
 
 @dataclass(frozen=True)
