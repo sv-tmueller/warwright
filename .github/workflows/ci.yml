@@ -41,7 +41,7 @@ jobs:
           working-directory: gym
           python-version: '3.12'
 
-      - run: uv sync
+      - run: uv sync --group train
         working-directory: gym
       - run: uv run ruff check .
         working-directory: gym
