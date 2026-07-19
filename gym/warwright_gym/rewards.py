@@ -3,7 +3,9 @@ env producing the same raw observation layout). This module NEVER
 re-implements a game rule -- it only differences integer hp values the core
 already emitted in the env's own observations, and reads the terminal
 winner the env already computed. See gym/ENCODING.md's "Reward shaping"
-addendum for the full contract and the potential-based-shaping argument.
+addendum for the full contract and the potential-based-shaping argument
+(potential-based in form, but not strictly policy-invariant -- see below
+and `RewardShapingWrapper`'s docstring).
 
 Signal sources -- NOTHING ELSE:
   - Terminal: `info["winner"]` on a sub-env's terminal frame (`"A"` -> win,
@@ -120,9 +122,15 @@ class RewardShapingWrapper(VectorWrapper):
     passed explicitly: it is not part of any public env attribute, and this
     module never reads env-private state.
 
-    Potential-based (see gym/ENCODING.md): the hp-delta shaping terms are
-    `Phi(s') - Phi(s)` for a fixed potential function of normalized team
-    hp, so they do not change which policy is optimal.
+    Potential-based in form (see gym/ENCODING.md): the hp-delta shaping
+    terms are `Phi(s') - Phi(s)` for a fixed potential function of
+    normalized team hp -- the `gamma = 1` case of Ng, Harada & Russell
+    1999. This is NOT strict Ng-Harada-Russell policy invariance: that
+    theorem also requires `Phi = 0` at terminal states, which does not
+    hold here, so the shaping adds a trajectory-dependent
+    `Phi(s_T) - Phi(s_0)` term on top of the terminal win/loss reward --
+    a deliberate bias toward hp-conserving, high-margin wins, not a
+    policy-invariant transform.
 
     Autoreset-safe: `WarwrightVectorEnv` uses `AutoresetMode.NEXT_STEP`, so
     the frame immediately after a terminal frame is a brand-new episode,

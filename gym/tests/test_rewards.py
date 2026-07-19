@@ -359,6 +359,29 @@ def test_reset_rebaselines_prev_obs_and_caches_max_hp_only_from_the_first_reset(
     assert rewards[0] == pytest.approx(config.damage_dealt_weight * 50 / 100)
 
 
+# --- Defensive guards -------------------------------------------------------
+
+
+def test_negative_num_allies_raises_value_error():
+    stub = StubVectorEnv(1, reset_frames=[], step_frames=[])
+    config = RewardConfig()
+
+    with pytest.raises(ValueError, match="num_allies must be >= 0"):
+        RewardShapingWrapper(stub, config, num_allies=-1)
+
+
+def test_num_allies_exceeding_unit_block_count_raises_value_error():
+    # OBS_LENGTH only decomposes into 2 unit blocks (see NUM_ALLIES/module
+    # docstring above); requesting 3 allies exceeds that count.
+    reset_obs = _frame([_row(100, 100, 100)])
+    stub = StubVectorEnv(1, reset_frames=[(reset_obs, {})], step_frames=[])
+    config = RewardConfig()
+    wrapper = RewardShapingWrapper(stub, config, num_allies=3)
+
+    with pytest.raises(ValueError, match="exceeds the"):
+        wrapper.reset()
+
+
 # --- RewardConfig -----------------------------------------------------------
 
 

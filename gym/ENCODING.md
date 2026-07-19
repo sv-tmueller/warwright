@@ -263,10 +263,16 @@ wrapped env -- it never re-implements a rule:
   normalized by that team's total `maxHp`, read once from the first reset
   frame.
 
-This hp-delta shaping is **potential-based** (Ng, Harada & Russell 1999):
-define `Φ(s) = ally_hp_weight * team_hp(s)/team_max_hp - damage_dealt_weight
-* enemy_hp(s)/enemy_max_hp`; the shaping reward paid on a transition is
-exactly `Φ(s') - Φ(s)`, which does not change which policy is optimal.
+This hp-delta shaping is **potential-based in form** (the `γ = 1` case of Ng,
+Harada & Russell 1999): define `Φ(s) = ally_hp_weight * team_hp(s)/team_max_hp
+- damage_dealt_weight * enemy_hp(s)/enemy_max_hp`; the shaping reward paid on
+a transition is exactly `Φ(s') - Φ(s)`. This is **not** strict Ng-Harada-Russell
+policy invariance, though: that theorem also requires `Φ = 0` at terminal
+states, which does not hold here (`Φ(s_T)` is whatever hp margin exists at the
+end of the match). The net effect over an episode is the terminal win/loss
+reward plus a trajectory-dependent `Φ(s_T) - Φ(s_0)` term, i.e. a deliberate
+additional incentive toward hp-conserving, high-margin wins -- not a
+policy-invariant transform.
 
 **Autoreset boundary**: `WarwrightVectorEnv` autoresets a sub-env
 (`AutoresetMode.NEXT_STEP`) on the step *after* it reaches `done` -- that
