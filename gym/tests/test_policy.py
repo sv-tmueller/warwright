@@ -6,6 +6,10 @@ actor-critic MLP. No torch training loop here -- see test_ppo.py for that.
 from __future__ import annotations
 
 import numpy as np
+import pytest
+
+pytest.importorskip("torch")
+
 import torch
 
 from warwright_gym.training.policy import ActorCriticPolicy

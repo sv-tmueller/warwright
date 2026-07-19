@@ -38,7 +38,19 @@ def seed_everything(seed: int) -> None:
     `torch`), forces deterministic torch kernels, and pins torch to a
     single CPU thread. Guarantees identical runs SAME BOX, same config --
     NOT cross-machine bitwise equality (different BLAS/CPU builds can
-    still round differently); see gym/TRAINING_RESULTS.md."""
+    still round differently); see gym/TRAINING_RESULTS.md.
+
+    Asserts CPU-only rather than merely relying on the pinned CPU-wheel
+    torch index (`gym/pyproject.toml`'s `pytorch-cpu` source): this makes
+    the "training only ever runs on CPU" guarantee self-enforcing in code,
+    not just a byproduct of how the environment happens to have been
+    installed (e.g. a non-CPU torch build installed by some other means on
+    a GPU-equipped machine)."""
+    assert not torch.cuda.is_available(), (
+        "seed_everything: CUDA is available, but training must run on CPU for "
+        "determinism (see this function's docstring and gym/TRAINING_RESULTS.md); "
+        "install torch from the pinned CPU wheel index (gym/pyproject.toml) instead"
+    )
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -314,9 +326,11 @@ def ppo_update(
         "value_loss": float(np.mean(value_losses)),
         "entropy": float(np.mean(entropy_losses)),
         "num_valid_samples": num_valid,
-        # unused but kept for symmetry with flat_values (debug-only, avoids
-        # an unused-variable lint warning while documenting what's
-        # available to a future caller that wants the pre-update baseline).
+        # A reported diagnostic (not consumed by this loop itself): the
+        # mean of the buffer's PRE-update value estimates, over the same
+        # `valid` samples this update trains on. Surfaced in `train()`'s
+        # returned loss dict and committed to gym/TRAINING_RESULTS.md
+        # alongside the other loss diagnostics for that run.
         "mean_value_estimate": float(flat_values.mean().item()),
     }
 

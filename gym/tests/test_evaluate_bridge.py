@@ -9,6 +9,10 @@ regression that makes the default matchup unwinnable).
 
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("torch")
+
 from warwright_gym.env import WarwrightVectorEnv, default_build_a, default_build_b
 from warwright_gym.training.evaluate import EVAL_SEED_BASE, HeuristicPolicy, evaluate
 

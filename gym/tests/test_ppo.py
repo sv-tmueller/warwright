@@ -9,10 +9,26 @@ reproducibility tests.
 
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("torch")
+
 import torch
 
 from warwright_gym.training.policy import ActorCriticPolicy
 from warwright_gym.training.ppo import PPOConfig, compute_gae, mask_invalid_steps, seed_everything
+
+
+def test_seed_everything_asserts_cuda_is_not_available(monkeypatch):
+    # CPU-only determinism (see `seed_everything`'s docstring and
+    # gym/TRAINING_RESULTS.md) must be self-enforcing in code, not merely a
+    # byproduct of the pinned CPU-wheel torch index -- so a device that
+    # reports CUDA availability must fail loud rather than silently train
+    # non-deterministically.
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+
+    with pytest.raises(AssertionError, match="CPU"):
+        seed_everything(0)
 
 
 def test_seed_everything_makes_two_policy_inits_identical():

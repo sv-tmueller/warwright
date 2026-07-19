@@ -9,6 +9,10 @@ check.
 from __future__ import annotations
 
 import numpy as np
+import pytest
+
+pytest.importorskip("torch")
+
 import torch
 
 from warwright_gym.actions import ACTION_KIND_ATTACK, ACTION_KIND_MOVE_TOWARD

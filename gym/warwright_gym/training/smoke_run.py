@@ -3,10 +3,11 @@
 seed, full config incl. RewardConfig, before/after win rate, delta, N}`.
 
 NOT run by CI (the #65 SUB_PLAN reserves the measurable-improvement run for
-a manual, recorded execution -- see `gym/TRAINING_RESULTS.md`). Invoke
-directly:
+a manual, recorded execution -- see `gym/TRAINING_RESULTS.md`). Requires the
+optional `train` dependency group (`uv sync --directory gym --group train`
+-- see `gym/TRAINING_RESULTS.md`). Invoke directly:
 
-    uv run --directory gym python -m warwright_gym.training.smoke_run
+    uv run --directory gym --group train python -m warwright_gym.training.smoke_run
 
 ## Build pair: a bounded-iteration substitution (SUB_PLAN step 3)
 

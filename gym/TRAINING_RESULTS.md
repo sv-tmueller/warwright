@@ -1,6 +1,22 @@
 # #65 smoke training run results
 
-Recorded from `uv run --directory gym python -m warwright_gym.training.smoke_run --seed 1`,
+The training modules (`warwright_gym.training.*`) depend on torch, which
+lives in the optional `train` dependency group (`gym/pyproject.toml`) --
+NOT installed by a plain `uv sync`/`uv run`, so a fresh clone must opt in
+explicitly:
+
+```bash
+uv sync --directory gym --group train
+uv run --directory gym --group train pytest        # includes the training tests
+uv run --directory gym --group train ruff check .
+```
+
+(Without `--group train`, `uv run --directory gym pytest` still runs
+cleanly -- the training test modules `pytest.importorskip("torch")` and
+SKIP rather than error. CI always installs the `train` group, so it is
+unaffected either way.)
+
+Recorded from `uv run --directory gym --group train python -m warwright_gym.training.smoke_run --seed 1`,
 run on the commit below (same box, single CPU thread, `torch.use_deterministic_algorithms(True)`
 per `warwright_gym.training.ppo.seed_everything`).
 

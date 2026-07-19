@@ -16,6 +16,10 @@ from __future__ import annotations
 
 import math
 
+import pytest
+
+pytest.importorskip("torch")
+
 import torch
 
 from warwright_gym.env import WarwrightVectorEnv, default_build_a, default_build_b
@@ -40,7 +44,12 @@ def _tiny_config(seed: int) -> PPOConfig:
         num_envs=2,
         ticks_per_step=TICKS_PER_STEP,
         num_steps=8,
-        total_timesteps=16,  # exactly one rollout/update
+        # Two rollouts/updates (steps_per_rollout = num_steps * num_envs =
+        # 8 * 2 = 16), not one: a single update never exercises cross-update
+        # carry-over (Adam optimizer state, `obs`/`pending_reset` threading
+        # between `train()`'s update loop iterations), which the
+        # reproducibility test below is meant to guard.
+        total_timesteps=32,
         update_epochs=1,
         num_minibatches=1,
         seed=seed,
