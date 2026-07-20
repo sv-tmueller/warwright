@@ -1,10 +1,8 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "outDir": "dist",
-    "rootDir": "src",
     "types": ["node"]
   },
-  "include": ["src"],
-  "exclude": ["fixtures", "submissions"]
+  "include": ["src", "submissions"],
+  "exclude": ["fixtures"]
 }
