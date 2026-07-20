@@ -1,6 +1,6 @@
 import type { Behavior } from '@warwright/core';
 import type { GauntletResult } from './gauntlet.js';
-import { runGauntlet } from './gauntlet.js';
+import { GAUNTLET_SEEDS, runGauntlet } from './gauntlet.js';
 import type { SubmissionManifest } from './manifest.js';
 
 // Calibrated from MEASURED win rates (see the #67b PR report / this file's
@@ -48,8 +48,21 @@ export type Stage3Result = {
  * (either the gauntlet's own -- e.g. a roster-shape mismatch, see
  * gauntlet.ts -- or a below-the-bar rejection) on failure; returns a
  * Stage3Result only on a clear pass.
+ *
+ * `seeds` defaults to the full, committed `GAUNTLET_SEEDS` (the real gate:
+ * every production caller -- validate.ts, and therefore cli.ts -- calls
+ * this with no third argument, so the production bar is always evaluated
+ * over all 25 seeds). The parameter exists so foundry's OWN test suite can
+ * exercise this function's plumbing (stage-attribution, pass/fail wiring)
+ * against a small seed set without re-running an expensive policy
+ * Behavior's inference 25 times per test -- see stage3.test.ts. Never
+ * reach for this from production code.
  */
-export function runStage3(manifest: SubmissionManifest, behavior: Behavior): Stage3Result {
+export function runStage3(
+  manifest: SubmissionManifest,
+  behavior: Behavior,
+  seeds: readonly number[] = GAUNTLET_SEEDS,
+): Stage3Result {
   if (behavior.id !== manifest.id) {
     // Defensive: load.ts already enforces this, but stage3 never trusts a
     // caller that skipped stages 1-2.
@@ -58,7 +71,7 @@ export function runStage3(manifest: SubmissionManifest, behavior: Behavior): Sta
     );
   }
 
-  const gauntlet: GauntletResult = runGauntlet(manifest, behavior);
+  const gauntlet: GauntletResult = runGauntlet(manifest, behavior, seeds);
 
   if (gauntlet.winRate < BASELINE_WIN_RATE_THRESHOLD) {
     throw new Error(

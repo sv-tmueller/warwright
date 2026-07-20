@@ -24,17 +24,21 @@ function runCli(dir: string): CliRun {
 // gate step and a submitter both invoke) against every committed valid
 // submission and every committed invalid fixture, and asserts the process
 // exit code and the reported failing stage.
+//
+// Only sample-aggro (rule-based) exercises the CLI's success path here.
+// cli.ts is submission-agnostic wiring -- it calls validateSubmission()
+// and formats whatever ValidateReport comes back, with no policy-specific
+// branch -- so it doesn't need its own full 25-seed exported-policy proof
+// on top of validate.test.ts's canonical sample-policy case (which already
+// proves the same production stage-3 gate, in-process, without paying a
+// second real-CLI-process's worth of spawn + full-gauntlet cost here too).
 describe('foundry validate CLI (end to end)', () => {
-  it.each(['sample-aggro', 'sample-policy'])(
-    'exits 0 for the valid submission %s',
-    (submissionId) => {
-      const result = runCli(`packages/foundry/submissions/${submissionId}`);
+  it('exits 0 for the valid submission sample-aggro', () => {
+    const result = runCli('packages/foundry/submissions/sample-aggro');
 
-      expect(result.status).toBe(0);
-      expect(result.stdout).toMatch(/^PASS/);
-    },
-    20_000,
-  );
+    expect(result.status).toBe(0);
+    expect(result.stdout).toMatch(/^PASS/);
+  });
 
   it.each([
     ['bad-manifest', 1],

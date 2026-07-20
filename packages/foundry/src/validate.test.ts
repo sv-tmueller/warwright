@@ -18,9 +18,21 @@ describe('validateSubmission', () => {
     expect(report.stage3.winRate).toBeGreaterThanOrEqual(BASELINE_WIN_RATE_THRESHOLD);
   });
 
-  // Longer timeout: 25 seeds of policy-smoke-v1 inference is noticeably
-  // slower than the rule-based sample-aggro case, and can cross the
-  // default 5000ms under full-monorepo test-suite CPU contention.
+  // THE canonical full-N=25 exported-policy end-to-end test: this is the
+  // ONE place in the suite that runs sample-policy through the real,
+  // default GAUNTLET_SEEDS (see gauntlet.ts) -- proving the production
+  // bar itself, not just the plumbing around it. Every other foundry test
+  // touching sample-policy (stage3.test.ts, reproducibility.test.ts) uses
+  // a small, explicit seed set instead, since they're exercising
+  // pass/fail wiring and determinism, not re-proving the full 25-seed
+  // gate -- see each of their comments.
+  //
+  // Generous timeout: 25 seeds of policy-smoke-v1 inference (its actorHead
+  // alone has a >2000-wide discretized move output) took ~1.3s in
+  // isolation but crossed the default 20000ms under CI's full-monorepo
+  // `pnpm -r test` CPU contention (see #67's fix-round report). 60s is
+  // ~45x that isolated runtime, ample headroom for a slow, contended
+  // runner without weakening the actual N=25 gate this proves.
   it(
     'runs a valid exported-policy submission (sample-policy) through all 3 stages to a pass',
     async () => {
@@ -30,8 +42,9 @@ describe('validateSubmission', () => {
       if (!report.ok) throw new Error('expected ok');
       expect(report.manifest.id).toBe('sample-policy');
       expect(report.stage3.status).toBe('pass');
+      expect(report.stage3.total).toBe(25);
     },
-    20_000,
+    60_000,
   );
 
   it('rejects fixtures/bad-manifest at stage 1', async () => {
