@@ -2,7 +2,7 @@ import { eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createDb, type Database } from '../db/client.js';
 import { runMigrations } from '../db/migrate.js';
-import { DEFAULT_RATING, DEFAULT_RATING_DEVIATION, matches, ratings, users } from '../db/schema.js';
+import { DEFAULT_RATING, DEFAULT_RATING_DEVIATION, DEFAULT_VOLATILITY, matches, ratings, users } from '../db/schema.js';
 import { updateGlicko2Period } from './glicko2.js';
 import { applyMatchRatings } from './service.js';
 
@@ -144,5 +144,97 @@ describe.skipIf(!url)('applyMatchRatings', () => {
   it('returns "already-rated" for an unknown matchId without throwing', async () => {
     const outcome = await applyMatchRatings(db, '00000000-0000-0000-0000-000000000000');
     expect(outcome).toBe('already-rated');
+  });
+
+  describe('concurrency / FOR UPDATE locking', () => {
+    // Deterministic synchronization point, not a sleep-based assertion:
+    // polls pg_stat_activity until `n` backends are observed blocked
+    // (wait_event_type = 'Lock') on a query matching `queryPattern`. Bounded
+    // by the enclosing test's timeout, not by elapsed wall-clock time — the
+    // loop's own pass/fail never depends on how long it took to converge.
+    //
+    // Deliberately does NOT use pg_blocking_pids(...) containment of a
+    // specific pid: Postgres queues a second waiter behind the first
+    // waiter's own tuple lock, so the second waiter's blocking pid is the
+    // first waiter, not the raw client holding the original lock.
+    // wait_event_type = 'Lock' counts every blocked backend correctly
+    // regardless of queue position.
+    async function waitForLockWaiters(n: number, queryPattern: RegExp, timeoutMs = 10_000): Promise<void> {
+      const deadline = Date.now() + timeoutMs;
+      for (;;) {
+        const { rows } = await pool.query<{ query: string }>(
+          "SELECT query FROM pg_stat_activity WHERE wait_event_type = 'Lock'"
+        );
+        const matching = rows.filter((row) => queryPattern.test(row.query));
+        if (matching.length >= n) return;
+        if (Date.now() >= deadline) {
+          throw new Error(
+            `waitForLockWaiters: timed out waiting for ${n} backend(s) blocked matching ${queryPattern}; ` +
+              `saw ${matching.length} of ${rows.length} total lock waiters`
+          );
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+    }
+
+    it(
+      'two concurrent applyMatchRatings(sameMatchId) calls: exactly one applied, one already-rated, rows updated once',
+      async () => {
+        const userAId = await makeUser();
+        const userBId = await makeUser();
+        const matchId = await makeMatch(userAId, userBId, 'A');
+
+        // Both users start from the lazy defaults (no pre-inserted rows);
+        // this is the single-application recomputation the final rows must
+        // match, proving the double-apply did not double-count.
+        const preA = { rating: DEFAULT_RATING, ratingDeviation: DEFAULT_RATING_DEVIATION, volatility: DEFAULT_VOLATILITY };
+        const preB = { rating: DEFAULT_RATING, ratingDeviation: DEFAULT_RATING_DEVIATION, volatility: DEFAULT_VOLATILITY };
+        const expectedA = updateGlicko2Period(preA, [{ opponent: preB, score: 1 }]);
+        const expectedB = updateGlicko2Period(preB, [{ opponent: preA, score: 0 }]);
+
+        const rawClient = await pool.connect();
+        try {
+          // Gate the claim UPDATE by locking the matches row first, so both
+          // applyMatchRatings calls are provably in flight (both blocked on
+          // the claim UPDATE) before either is allowed to proceed. A bare
+          // Promise.all of two applies could serialize by accident and pass
+          // vacuously; this control rules that out.
+          await rawClient.query('BEGIN');
+          await rawClient.query('SELECT * FROM matches WHERE id = $1 FOR UPDATE', [matchId]);
+
+          const p1 = applyMatchRatings(db, matchId);
+          const p2 = applyMatchRatings(db, matchId);
+
+          await waitForLockWaiters(2, /"matches"/);
+
+          await rawClient.query('COMMIT');
+
+          const outcomes = (await Promise.all([p1, p2])).sort();
+          // Never assert which promise won — wake order belongs to
+          // Postgres; asserting it would reintroduce flakiness.
+          expect(outcomes).toEqual(['already-rated', 'applied']);
+        } finally {
+          // ROLLBACK is a harmless no-op once already committed; this just
+          // guarantees a failed assertion above can never wedge afterAll's
+          // pool.end() with an open transaction.
+          await rawClient.query('ROLLBACK');
+          rawClient.release();
+        }
+
+        const rows = await db.select().from(ratings).where(inArray(ratings.userId, [userAId, userBId]));
+        const rowA = rows.find((row) => row.userId === userAId)!;
+        const rowB = rows.find((row) => row.userId === userBId)!;
+        expect(rowA.rating).toBeCloseTo(expectedA.rating, 9);
+        expect(rowA.ratingDeviation).toBeCloseTo(expectedA.ratingDeviation, 9);
+        expect(rowA.volatility).toBeCloseTo(expectedA.volatility, 9);
+        expect(rowB.rating).toBeCloseTo(expectedB.rating, 9);
+        expect(rowB.ratingDeviation).toBeCloseTo(expectedB.ratingDeviation, 9);
+        expect(rowB.volatility).toBeCloseTo(expectedB.volatility, 9);
+
+        const [matchRow] = await db.select().from(matches).where(eq(matches.id, matchId));
+        expect(matchRow?.ratedAt).not.toBeNull();
+      },
+      15_000
+    );
   });
 });
