@@ -21,8 +21,11 @@ export const OBS_ENCODING_VERSION = 1;
 
 // Sentinel written into a self-block skill-cooldown slot when the unit does
 // not have that catalog skill equipped. Ticks are always >= 0, so -1 can
-// never collide with a real cooldown value.
-const SKILL_COOLDOWN_ABSENT = -1;
+// never collide with a real cooldown value. Exported so
+// content/behaviors/policy/featurize.ts (the TS mirror of
+// gym/warwright_gym/featurize.py) can special-case it without a duplicated
+// magic number.
+export const SKILL_COOLDOWN_ABSENT = -1;
 
 // --- Self block (one per encodeObservation call) -------------------------
 // Field order, indices 0..OBS_SELF_FIELD_COUNT-1:
