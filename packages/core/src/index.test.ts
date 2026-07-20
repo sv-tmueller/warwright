@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { behaviorIds, createSteppedMatch, EXTERNAL_BEHAVIOR_ID, roles, skills } from './index.js';
+import {
+  behaviorIds,
+  createSteppedMatch,
+  EXTERNAL_BEHAVIOR_ID,
+  policySmokeV1,
+  roles,
+  skills,
+} from './index.js';
 
 describe('@warwright/core', () => {
   it('loads the package', () => {
@@ -37,5 +44,10 @@ describe('@warwright/core', () => {
   it('exposes the external sentinel id and the stepped-match factory', () => {
     expect(EXTERNAL_BEHAVIOR_ID).toBe('external');
     expect(typeof createSteppedMatch).toBe('function');
+  });
+
+  it('exposes the policySmokeV1 Behavior so an exported-policy submission can reuse it under a new id', () => {
+    expect(policySmokeV1.id).toBe('policy-smoke-v1');
+    expect(typeof policySmokeV1.decide).toBe('function');
   });
 });
