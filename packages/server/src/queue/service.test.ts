@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { createQueueService, selectOpponent, type WaitingEntry } from './service.js';
+import { describe, expect, it, vi } from 'vitest';
+import { createManualScheduler, createQueueService, selectOpponent, type Pairing, type WaitingEntry } from './service.js';
 
 function entry(overrides: Partial<WaitingEntry> = {}): WaitingEntry {
   return {
@@ -9,6 +9,15 @@ function entry(overrides: Partial<WaitingEntry> = {}): WaitingEntry {
     enqueuedAt: 0,
     ...overrides,
   };
+}
+
+/** A resolver stub that resolves immediately and records every pass it was handed. */
+function recordingResolver() {
+  const calls: Pairing[][] = [];
+  const resolver = vi.fn(async (pairings: Pairing[]) => {
+    calls.push(pairings);
+  });
+  return { resolver, calls };
 }
 
 describe('selectOpponent', () => {
@@ -53,52 +62,53 @@ describe('selectOpponent', () => {
 
 describe('QueueService', () => {
   it('enqueues a lone player as waiting, and reports waiting on GET', () => {
-    const service = createQueueService();
+    const { resolver } = recordingResolver();
+    const service = createQueueService({ resolver, scheduler: createManualScheduler() });
     const outcome = service.enqueue('a', 1500, { name: 'A' });
-    expect(outcome.status).toBe('waiting');
+    expect(outcome).toEqual({ status: 'waiting' });
     expect(service.getStatus('a')).toEqual({ status: 'waiting' });
   });
 
   it('reports idle for a user who never queued', () => {
-    const service = createQueueService();
+    const { resolver } = recordingResolver();
+    const service = createQueueService({ resolver, scheduler: createManualScheduler() });
     expect(service.getStatus('nobody')).toEqual({ status: 'idle' });
   });
 
-  it('pairs a second, closer-rated player with the first: waiting player becomes A, joiner becomes B', () => {
-    const service = createQueueService();
+  it('always returns waiting for a second distinct enqueue too: no inline pairing (the #108 policy change)', () => {
+    const { resolver } = recordingResolver();
+    const scheduler = createManualScheduler();
+    const service = createQueueService({ resolver, scheduler, windowMs: 5000, maxPool: 8 });
     service.enqueue('a', 1500, { name: 'A' });
     const outcome = service.enqueue('b', 1520, { name: 'B' });
 
-    expect(outcome.status).toBe('paired');
-    if (outcome.status !== 'paired') throw new Error('expected paired');
-    expect(outcome.pairing.userAId).toBe('a');
-    expect(outcome.pairing.userBId).toBe('b');
-    expect(outcome.pairing.buildA).toEqual({ name: 'A' });
-    expect(outcome.pairing.buildB).toEqual({ name: 'B' });
+    expect(outcome).toEqual({ status: 'waiting' });
+    // Still waiting, not resolving: the pass hasn't run yet.
+    expect(service.getStatus('a')).toEqual({ status: 'waiting' });
+    expect(service.getStatus('b')).toEqual({ status: 'waiting' });
+    expect(resolver).not.toHaveBeenCalled();
   });
 
   it('rejects a double-enqueue from the same waiting user with an already-queued status (409 source)', () => {
-    const service = createQueueService();
+    const { resolver } = recordingResolver();
+    const service = createQueueService({ resolver, scheduler: createManualScheduler() });
     service.enqueue('a', 1500, { name: 'A' });
     const second = service.enqueue('a', 1500, { name: 'A again' });
-    expect(second.status).toBe('already-queued');
+    expect(second).toEqual({ status: 'already-queued' });
   });
 
-  it('never self-pairs: a lone user enqueuing twice stays waiting, not paired', () => {
-    const service = createQueueService();
+  it('retains a matched result until claimed, and clears it on the next enqueue', async () => {
+    const { resolver, calls } = recordingResolver();
+    const scheduler = createManualScheduler();
+    const service = createQueueService({ resolver, scheduler, windowMs: 100, maxPool: 8 });
     service.enqueue('a', 1500, { name: 'A' });
-    const second = service.enqueue('a', 1500, { name: 'A again' });
-    expect(second.status).not.toBe('paired');
-  });
+    service.enqueue('b', 1500, { name: 'B' });
 
-  it('retains a matched result until claimed, and clears it on the next enqueue', () => {
-    const service = createQueueService();
-    service.enqueue('a', 1500, { name: 'A' });
-    const outcome = service.enqueue('b', 1500, { name: 'B' });
-    if (outcome.status !== 'paired') throw new Error('expected paired');
-
+    await scheduler.fire();
+    expect(calls).toHaveLength(1);
+    const [pairing] = calls[0]!;
     const result = { version: 2, seed: 1, winner: 'A' as const, eventLog: [], hash: 123 };
-    service.completePairing(outcome.pairing, 'match-1', result);
+    service.completePairing(pairing!, 'match-1', result);
 
     // Retained across repeated GETs.
     expect(service.getStatus('a')).toEqual({ status: 'matched', matchId: 'match-1', result });
@@ -110,58 +120,300 @@ describe('QueueService', () => {
     expect(service.getStatus('a')).toEqual({ status: 'waiting' });
   });
 
-  it('restores the opponent at the head of the queue when resolution fails, and the joiner is left idle', () => {
-    const service = createQueueService();
-    service.enqueue('a', 1500, { name: 'A' });
-    const outcome = service.enqueue('b', 1500, { name: 'B' });
-    if (outcome.status !== 'paired') throw new Error('expected paired');
+  describe('pairing pass', () => {
+    it('sorts the pool FIFO by enqueuedAt and pairs the oldest entry first via the unchanged selectOpponent', async () => {
+      const { resolver, calls } = recordingResolver();
+      const scheduler = createManualScheduler();
+      const service = createQueueService({ resolver, scheduler, windowMs: 100, maxPool: 8 });
 
-    // Both are transiently "resolving" and dequeue must reject that state.
-    expect(service.dequeue('a')).toBe('resolving');
+      // Enqueue order deliberately doesn't match rating-nearness order.
+      service.enqueue('q', 1600, { name: 'Q' }); // oldest
+      service.enqueue('p', 1200, { name: 'P' });
+      service.enqueue('r', 1500, { name: 'R' }); // nearest to Q's 1600? no: |1600-1500|=100 vs |1600-1200|=400
 
-    service.failPairing(outcome.pairing);
+      await scheduler.fire();
 
-    // A is restored to waiting.
-    expect(service.getStatus('a')).toEqual({ status: 'waiting' });
-    // B (the failed caller) is not re-queued; they're back to idle.
-    expect(service.getStatus('b')).toEqual({ status: 'idle' });
+      expect(calls).toHaveLength(1);
+      const pairings = calls[0]!;
+      expect(pairings).toHaveLength(1);
+      // Oldest (q) picks nearest rating among {p, r}: r (1500, diff 100) over p (1200, diff 400).
+      expect(pairings[0]!.userAId).toBe('q');
+      expect(pairings[0]!.userBId).toBe('r');
+      // Leftover p stays waiting.
+      expect(service.getStatus('p')).toEqual({ status: 'waiting' });
+    });
 
-    // A can be paired again by a new joiner.
-    const rePaired = service.enqueue('c', 1500, { name: 'C' });
-    expect(rePaired.status).toBe('paired');
-    if (rePaired.status !== 'paired') throw new Error('expected paired');
-    expect(rePaired.pairing.userAId).toBe('a');
-    expect(rePaired.pairing.userBId).toBe('c');
+    it('pairs a pool of 4 into exactly two pairings in one pass, oldest-first repeatedly', async () => {
+      const { resolver, calls } = recordingResolver();
+      const scheduler = createManualScheduler();
+      const service = createQueueService({ resolver, scheduler, windowMs: 100, maxPool: 8 });
+
+      service.enqueue('a', 1500, { name: 'A' });
+      service.enqueue('b', 1510, { name: 'B' });
+      service.enqueue('c', 1490, { name: 'C' });
+      service.enqueue('d', 1505, { name: 'D' });
+
+      await scheduler.fire();
+
+      expect(calls).toHaveLength(1);
+      const pairings = calls[0]!;
+      expect(pairings).toHaveLength(2);
+
+      const paired = new Set<string>();
+      for (const pairing of pairings) {
+        expect(paired.has(pairing.userAId)).toBe(false);
+        expect(paired.has(pairing.userBId)).toBe(false);
+        paired.add(pairing.userAId);
+        paired.add(pairing.userBId);
+      }
+      expect(paired).toEqual(new Set(['a', 'b', 'c', 'd']));
+
+      // No leftovers, nobody double-booked: every user is now resolving
+      // (getStatus reports 'waiting' for both waiting and resolving users —
+      // dequeue() is what distinguishes them, per its own doc comment).
+      for (const id of ['a', 'b', 'c', 'd']) {
+        expect(service.dequeue(id)).toBe('resolving');
+      }
+    });
+
+    it('leaves an odd leftover waiting after a pass over an odd-sized pool', async () => {
+      const { resolver, calls } = recordingResolver();
+      const scheduler = createManualScheduler();
+      const service = createQueueService({ resolver, scheduler, windowMs: 100, maxPool: 8 });
+
+      service.enqueue('a', 1500, { name: 'A' });
+      service.enqueue('b', 1510, { name: 'B' });
+      service.enqueue('c', 1490, { name: 'C' });
+
+      await scheduler.fire();
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0]).toHaveLength(1);
+      const dequeueOutcomes = ['a', 'b', 'c'].map((id) => service.dequeue(id));
+      expect(dequeueOutcomes.filter((outcome) => outcome === 'removed')).toHaveLength(1);
+      expect(dequeueOutcomes.filter((outcome) => outcome === 'resolving')).toHaveLength(2);
+    });
+
+    it('never double- or self-pairs across a pass over a larger pool', async () => {
+      const { resolver, calls } = recordingResolver();
+      const scheduler = createManualScheduler();
+      const service = createQueueService({ resolver, scheduler, windowMs: 100, maxPool: 8 });
+
+      const ratings = [1200, 1250, 1300, 1350, 1400, 1450, 1500];
+      ratings.forEach((rating, index) => {
+        service.enqueue(`u${index}`, rating, { name: `U${index}` });
+      });
+
+      await scheduler.fire();
+
+      const seen = new Set<string>();
+      for (const pairing of calls[0]!) {
+        expect(pairing.userAId).not.toBe(pairing.userBId);
+        expect(seen.has(pairing.userAId)).toBe(false);
+        expect(seen.has(pairing.userBId)).toBe(false);
+        seen.add(pairing.userAId);
+        seen.add(pairing.userBId);
+      }
+    });
+  });
+
+  describe('K-trigger (maxPool)', () => {
+    it('runs the pass immediately when the pool reaches maxPool, without waiting for the timer', async () => {
+      const { resolver, calls } = recordingResolver();
+      const scheduler = createManualScheduler();
+      const service = createQueueService({ resolver, scheduler, windowMs: 5000, maxPool: 2 });
+
+      service.enqueue('a', 1500, { name: 'A' });
+      expect(scheduler.pending).toBe(false); // lone waiter: not pairable yet, no timer armed
+
+      const outcome = service.enqueue('b', 1520, { name: 'B' });
+      expect(outcome).toEqual({ status: 'waiting' });
+
+      // K reached: pass ran synchronously, no timer fire needed.
+      await service.settled();
+      expect(calls).toHaveLength(1);
+      expect(calls[0]).toHaveLength(1);
+      expect(scheduler.pending).toBe(false);
+    });
+
+    it('cancels any pending timer when the K-trigger pass runs', async () => {
+      const { resolver, calls } = recordingResolver();
+      const scheduler = createManualScheduler();
+      const service = createQueueService({ resolver, scheduler, windowMs: 5000, maxPool: 3 });
+
+      service.enqueue('a', 1500, { name: 'A' });
+      service.enqueue('b', 1520, { name: 'B' });
+      expect(scheduler.pending).toBe(true);
+      expect(scheduler.scheduleCount).toBe(1);
+
+      service.enqueue('c', 1000, { name: 'C' });
+      await service.settled();
+
+      expect(scheduler.pending).toBe(false);
+      expect(calls).toHaveLength(1);
+    });
+  });
+
+  describe('timer arm / re-arm', () => {
+    it('arms a timer only when the pool becomes pairable (reaches 2), not on the first (lone) enqueue', () => {
+      const { resolver } = recordingResolver();
+      const scheduler = createManualScheduler();
+      const service = createQueueService({ resolver, scheduler, windowMs: 5000, maxPool: 8 });
+
+      service.enqueue('a', 1500, { name: 'A' });
+      expect(scheduler.pending).toBe(false);
+
+      service.enqueue('b', 1520, { name: 'B' });
+      expect(scheduler.pending).toBe(true);
+      expect(scheduler.pendingMs).toBe(5000);
+    });
+
+    it('does not arm a second timer while one is already pending', () => {
+      const { resolver } = recordingResolver();
+      const scheduler = createManualScheduler();
+      const service = createQueueService({ resolver, scheduler, windowMs: 5000, maxPool: 8 });
+
+      service.enqueue('a', 1500, { name: 'A' });
+      service.enqueue('b', 1520, { name: 'B' });
+      expect(scheduler.scheduleCount).toBe(1);
+
+      service.enqueue('c', 1000, { name: 'C' });
+      expect(scheduler.scheduleCount).toBe(1);
+    });
+
+    it('does not re-arm after a pass leaves an odd leftover (pool size 1, not pairable)', async () => {
+      const { resolver } = recordingResolver();
+      const scheduler = createManualScheduler();
+      const service = createQueueService({ resolver, scheduler, windowMs: 100, maxPool: 8 });
+
+      service.enqueue('a', 1500, { name: 'A' });
+      service.enqueue('b', 1510, { name: 'B' });
+      service.enqueue('c', 1490, { name: 'C' });
+
+      await scheduler.fire();
+
+      expect(scheduler.pending).toBe(false);
+    });
+
+    it('re-arms once the pool becomes pairable again after a pass', async () => {
+      const { resolver } = recordingResolver();
+      const scheduler = createManualScheduler();
+      const service = createQueueService({ resolver, scheduler, windowMs: 100, maxPool: 8 });
+
+      service.enqueue('a', 1500, { name: 'A' });
+      service.enqueue('b', 1510, { name: 'B' });
+      service.enqueue('c', 1490, { name: 'C' });
+
+      await scheduler.fire();
+      expect(scheduler.pending).toBe(false);
+
+      // A fourth joiner makes the leftover + joiner pairable again.
+      service.enqueue('d', 1505, { name: 'D' });
+      expect(scheduler.pending).toBe(true);
+    });
+
+    it('re-arms after failPairing restores both entries, making the pool pairable again', async () => {
+      const { calls } = recordingResolver();
+      const serviceBox: { current?: ReturnType<typeof createQueueService> } = {};
+      const resolver = vi.fn(async (pairings: Pairing[]) => {
+        calls.push(pairings);
+        // Simulate resolveMatch rejecting: the resolver's own contract is
+        // to catch and call failPairing, never let this reject upward.
+        serviceBox.current!.failPairing(pairings[0]!);
+      });
+      const scheduler = createManualScheduler();
+      const service = createQueueService({ resolver, scheduler, windowMs: 100, maxPool: 8 });
+      serviceBox.current = service;
+
+      service.enqueue('a', 1500, { name: 'A' });
+      service.enqueue('b', 1510, { name: 'B' });
+
+      await scheduler.fire();
+      expect(service.getStatus('a')).toEqual({ status: 'waiting' });
+      expect(service.getStatus('b')).toEqual({ status: 'waiting' });
+      // Both restored -> pool size 2 again -> pairable -> timer re-armed.
+      expect(scheduler.pending).toBe(true);
+    });
+  });
+
+  describe('failure restore (both-restore)', () => {
+    it('restores BOTH entries to waiting when the resolver fails a pairing, unlike the #57 A-only restore', async () => {
+      const { resolver, calls } = recordingResolver();
+      const scheduler = createManualScheduler();
+      const service = createQueueService({ resolver, scheduler, windowMs: 100, maxPool: 8 });
+
+      service.enqueue('a', 1500, { name: 'A' });
+      service.enqueue('b', 1500, { name: 'B' });
+
+      await scheduler.fire();
+      const [pairing] = calls[0]!;
+
+      expect(service.dequeue('a')).toBe('resolving');
+
+      service.failPairing(pairing!);
+
+      expect(service.getStatus('a')).toEqual({ status: 'waiting' });
+      expect(service.getStatus('b')).toEqual({ status: 'waiting' });
+    });
+
+    it('a restored pairing can be re-paired by a subsequent pass', async () => {
+      const { resolver, calls } = recordingResolver();
+      const scheduler = createManualScheduler();
+      const service = createQueueService({ resolver, scheduler, windowMs: 100, maxPool: 8 });
+
+      service.enqueue('a', 1500, { name: 'A' });
+      service.enqueue('b', 1500, { name: 'B' });
+      await scheduler.fire();
+      const [pairing] = calls[0]!;
+      service.failPairing(pairing!);
+
+      service.enqueue('c', 1500, { name: 'C' });
+      expect(scheduler.pending).toBe(true);
+      await scheduler.fire();
+
+      expect(calls).toHaveLength(2);
+      expect(calls[1]).toHaveLength(1);
+      const rePaired = new Set([calls[1]![0]!.userAId, calls[1]![0]!.userBId]);
+      expect(rePaired.has('a') || rePaired.has('b')).toBe(true);
+    });
   });
 
   describe('dequeue', () => {
     it('removes a waiting user: 204-equivalent "removed"', () => {
-      const service = createQueueService();
+      const { resolver } = recordingResolver();
+      const service = createQueueService({ resolver, scheduler: createManualScheduler() });
       service.enqueue('a', 1500, { name: 'A' });
       expect(service.dequeue('a')).toBe('removed');
       expect(service.getStatus('a')).toEqual({ status: 'idle' });
     });
 
     it('reports not-queued for a user who never queued', () => {
-      const service = createQueueService();
+      const { resolver } = recordingResolver();
+      const service = createQueueService({ resolver, scheduler: createManualScheduler() });
       expect(service.dequeue('nobody')).toBe('not-queued');
     });
 
-    it('reports resolving for a user mid-pairing, refusing to remove them', () => {
-      const service = createQueueService();
+    it('reports resolving for a user mid-pairing, refusing to remove them', async () => {
+      const { resolver } = recordingResolver();
+      const scheduler = createManualScheduler();
+      const service = createQueueService({ resolver, scheduler, windowMs: 100, maxPool: 8 });
       service.enqueue('a', 1500, { name: 'A' });
       service.enqueue('b', 1500, { name: 'B' });
+      await scheduler.fire();
       expect(service.dequeue('a')).toBe('resolving');
       expect(service.dequeue('b')).toBe('resolving');
     });
 
-    it('reports not-queued for a matched-but-unclaimed user', () => {
-      const service = createQueueService();
+    it('reports not-queued for a matched-but-unclaimed user', async () => {
+      const { resolver, calls } = recordingResolver();
+      const scheduler = createManualScheduler();
+      const service = createQueueService({ resolver, scheduler, windowMs: 100, maxPool: 8 });
       service.enqueue('a', 1500, { name: 'A' });
-      const outcome = service.enqueue('b', 1500, { name: 'B' });
-      if (outcome.status !== 'paired') throw new Error('expected paired');
+      service.enqueue('b', 1500, { name: 'B' });
+      await scheduler.fire();
+      const [pairing] = calls[0]!;
       const result = { version: 2, seed: 1, winner: 'A' as const, eventLog: [], hash: 123 };
-      service.completePairing(outcome.pairing, 'match-1', result);
+      service.completePairing(pairing!, 'match-1', result);
       expect(service.dequeue('a')).toBe('not-queued');
     });
   });
