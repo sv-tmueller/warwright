@@ -47,11 +47,20 @@ function buildUnit(
   };
 }
 
-export function init(version: number, seed: number, buildA: unknown, buildB: unknown): WorldState {
+// Shared by init (the zero-extras entry point) and createSteppedMatch (which
+// passes a registry built via createSeedRegistryWith so units may reference
+// an injected Behavior's id). Kept as a sibling export rather than an
+// optional param on `init` so `init`'s signature and behavior stay
+// byte-identical for every existing caller.
+export function initWithRegistry(
+  version: number,
+  seed: number,
+  buildA: unknown,
+  buildB: unknown,
+  registry: ReturnType<typeof createContentRegistry>,
+): WorldState {
   const parsedA = parseWarband(buildA);
   const parsedB = parseWarband(buildB);
-
-  const registry = createSeedRegistry();
 
   let nextId = 0;
   const units: Unit[] = [];
@@ -75,4 +84,8 @@ export function init(version: number, seed: number, buildA: unknown, buildB: unk
   emit(eventLog, { kind: 'match-start', tick: 0, version, seed, units: spawnInfos });
 
   return { version, seed, tick: 0, units, eventLog, rng: mulberry32(seed) };
+}
+
+export function init(version: number, seed: number, buildA: unknown, buildB: unknown): WorldState {
+  return initWithRegistry(version, seed, buildA, buildB, createSeedRegistry());
 }
