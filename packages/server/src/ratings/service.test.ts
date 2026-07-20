@@ -236,5 +236,93 @@ describe.skipIf(!url)('applyMatchRatings', () => {
       },
       15_000
     );
+
+    it(
+      'a concurrent applyMatchRatings blocks on a shared player\'s locked ratings row, then lands on sequential-equivalent values',
+      async () => {
+        const userAId = await makeUser();
+        const userBId = await makeUser();
+        // Distinct pre-match ratings, as in the exact-computation test above.
+        await db.insert(ratings).values([
+          { userId: userAId, rating: 1600, ratingDeviation: 120, volatility: 0.05 },
+          { userId: userBId, rating: 1450, ratingDeviation: 90, volatility: 0.07 },
+        ]);
+        const matchId = await makeMatch(userAId, userBId, 'B');
+
+        const preB = { rating: 1450, ratingDeviation: 90, volatility: 0.07 };
+        // The value the raw client commits for A while applyMatchRatings is
+        // blocked — the READ COMMITTED value the blocked call must re-read
+        // once unblocked, not the stale pre-lock value it observed before
+        // waiting.
+        const postLockA = { rating: 1620, ratingDeviation: 118, volatility: 0.051 };
+        const expectedA = updateGlicko2Period(postLockA, [{ opponent: preB, score: 0 }]);
+        const expectedB = updateGlicko2Period(preB, [{ opponent: postLockA, score: 1 }]);
+
+        let settled = false;
+        const rawClient = await pool.connect();
+        try {
+          await rawClient.query('BEGIN');
+          await rawClient.query('SELECT * FROM ratings WHERE user_id = $1 FOR UPDATE', [userAId]);
+          // Simulates a concurrent match write for the shared player, still
+          // open in the same transaction — this makes "sequential-
+          // equivalent" a real assertion rather than a tautology.
+          await rawClient.query(
+            'UPDATE ratings SET rating = $1, rating_deviation = $2, volatility = $3 WHERE user_id = $4',
+            [postLockA.rating, postLockA.ratingDeviation, postLockA.volatility, userAId]
+          );
+
+          const applyPromise = applyMatchRatings(db, matchId);
+          void applyPromise.then(
+            () => {
+              settled = true;
+            },
+            () => {
+              settled = true;
+            }
+          );
+
+          // The raw client's own in-transaction UPDATE (above) leaves an
+          // uncommitted new tuple version, so applyMatchRatings actually
+          // blocks one statement earlier than its own `SELECT ... FOR
+          // UPDATE`: at the lazy-default `INSERT ... ON CONFLICT DO
+          // NOTHING` upsert, whose conflict check must wait for that
+          // uncommitted version to resolve. (Verified empirically against
+          // pg_stat_activity — a bare `SELECT ... FOR UPDATE` with no
+          // accompanying UPDATE blocks at the later `FOR UPDATE` select
+          // instead, as ON CONFLICT DO NOTHING does not wait on a row that
+          // is merely lock-held, not modified.) Match on the ratings table
+          // rather than a specific statement so the assertion holds
+          // regardless of exactly which of applyMatchRatings' own
+          // statements is the one left waiting.
+          await waitForLockWaiters(1, /"ratings"/);
+          // The promise-gate proof that the call is genuinely blocked, not
+          // merely unscheduled.
+          expect(settled).toBe(false);
+
+          await rawClient.query('COMMIT');
+
+          const outcome = await applyPromise;
+          expect(outcome).toBe('applied');
+          expect(settled).toBe(true);
+        } finally {
+          // ROLLBACK is a harmless no-op once already committed; this just
+          // guarantees a failed assertion above can never wedge afterAll's
+          // pool.end() with an open transaction.
+          await rawClient.query('ROLLBACK');
+          rawClient.release();
+        }
+
+        const rows = await db.select().from(ratings).where(inArray(ratings.userId, [userAId, userBId]));
+        const rowA = rows.find((row) => row.userId === userAId)!;
+        const rowB = rows.find((row) => row.userId === userBId)!;
+        expect(rowA.rating).toBeCloseTo(expectedA.rating, 9);
+        expect(rowA.ratingDeviation).toBeCloseTo(expectedA.ratingDeviation, 9);
+        expect(rowA.volatility).toBeCloseTo(expectedA.volatility, 9);
+        expect(rowB.rating).toBeCloseTo(expectedB.rating, 9);
+        expect(rowB.ratingDeviation).toBeCloseTo(expectedB.ratingDeviation, 9);
+        expect(rowB.volatility).toBeCloseTo(expectedB.volatility, 9);
+      },
+      15_000
+    );
   });
 });
