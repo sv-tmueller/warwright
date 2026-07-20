@@ -65,7 +65,17 @@ const FORBIDDEN_NODE_IMPORTS = [
 
 export default tseslint.config(
   {
-    ignores: ['**/dist/**', '**/node_modules/**', '**/coverage/**'],
+    // packages/foundry/fixtures/** deliberately contains malformed
+    // manifests and impure/forbidden-token submissions (see #135): they
+    // exist to be REJECTED by the foundry gate's own tests, not to pass
+    // generic lint. packages/foundry/submissions/** stays linted (it's
+    // meant to be clean, gate-passing sample code).
+    ignores: [
+      '**/dist/**',
+      '**/node_modules/**',
+      '**/coverage/**',
+      'packages/foundry/fixtures/**',
+    ],
   },
   js.configs.recommended,
   tseslint.configs.recommended,

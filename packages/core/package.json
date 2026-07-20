@@ -9,6 +9,10 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./purity-tokens": {
+      "types": "./src/purity-tokens.ts",
+      "default": "./src/purity-tokens.ts"
     }
   },
   "files": [
