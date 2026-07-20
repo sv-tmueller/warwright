@@ -2,6 +2,10 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+declare global {
+  var IS_REACT_ACT_ENVIRONMENT: boolean | undefined;
+}
+
 // Mocks at the api-client module boundary (per the sub-plan on issue
 // #116/batch #139): OnlineMode.tsx reaches the network only through these
 // nine static named imports from './api-client.js', so this is the only seam
