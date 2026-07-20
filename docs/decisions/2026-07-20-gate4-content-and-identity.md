@@ -37,7 +37,11 @@ Ship **2 new Roles, 4 new Skills, 1 new engine primitive (augments) with 3 augme
 new status kinds** (a stun/root, and a positive buff) needed by two of the new Skills. This is deliberately
 small enough to land as one `RULESET_VERSION` bump (v2 -> v3) with one golden-replay regeneration, while
 being large enough to give the Phase-4 roster genuine new tactical shapes (crowd control, a buff-based
-support pattern, and stat-modifying loadout choices) instead of only recombining existing primitives.
+support pattern, and stat-modifying loadout choices) instead of only recombining existing primitives. **The
+4 new Skills also force a second, independent version bump — `OBS_ENCODING_VERSION` v1 -> v2 — because they
+grow the skill catalog that the observation encoder's self-block is sized against; see the corrected
+analysis and its honest-cost pricing under "Mandatory augment-primitive subsection" below (an earlier draft
+of this document wrongly scoped that analysis to augments only and claimed the batch was "not affected").**
 
 Reuse-only headroom is large and cheap: **any** new Role is just a new stat-line (`maxHp`, `armor`,
 `moveSpeed`, `attack`) against the existing `RoleSchema` — no bump. **Any** new Skill that combines the 3
@@ -67,6 +71,12 @@ Items 5, 6, and 7-9 all land under **one** `RULESET_VERSION` bump and **one** go
 sequenced as a single engine-primitives commit (see the #70 split below) — bumping once for a batch of
 primitives is preferable to bumping once per primitive, since each bump forces a full re-validation pass and
 an explanatory note; batching the explanation once is clearer than three near-duplicate notes.
+
+**Note on the "Ruleset bump?" column above.** That column tracks `RULESET_VERSION` only (combat-semantics
+changes). It is a *separate axis* from `OBS_ENCODING_VERSION` (observation-layout changes): as corrected
+below, adding **any** of the 4 new Skills — including the reuse-only ones (items 3, 4), which correctly show
+"No" for `RULESET_VERSION` — still grows the compiled-in skill catalog and therefore *does* require an
+`OBS_ENCODING_VERSION` bump. "No `RULESET_VERSION` bump" must not be read as "no version bump of any kind."
 
 ### Priced but not selected
 
@@ -113,26 +123,124 @@ items 7-9 above:
    slice in the #70 split below (or split further into #70/#74-adjacent work if the split wants it separate
    from #70).
 
-**Is `OBS_ENCODING_VERSION` affected? No — and this must be stated explicitly, not assumed.**
-`observation.ts`'s self-block encodes `hp`, `maxHp`, `pos.x/y`, `attackCooldownRemaining`, and one
-cooldown slot per catalog Skill; the per-unit block encodes `id`, `hp`, `maxHp`, `pos.x/y`, and squared
-distance. Augments apply init-time deltas to `Unit.maxHp`/`hp`/`armor`/`moveSpeed`, and of those, only
-`hp`/`maxHp` are ever read by the encoder — as *values*, not as a new field. An augmented unit's `hp`/`maxHp`
-just carry different (still integer) numbers through the same slots; the field order, field count, and the
-per-skill cooldown layout are all unchanged. `armor` and `moveSpeed` are not observation fields at all
-today, so augmenting them changes nothing about the encoder's layout either. **Conclusion: the augment
-primitive requires a `RULESET_VERSION` bump but requires no `OBS_ENCODING_VERSION` bump and no change to
-`observation.ts`.**
+**Is `OBS_ENCODING_VERSION` affected?**
+
+**By the augment primitive alone: no.** `observation.ts`'s self-block encodes `hp`, `maxHp`, `pos.x/y`,
+`attackCooldownRemaining`, and one cooldown slot per catalog Skill; the per-unit block encodes `id`, `hp`,
+`maxHp`, `pos.x/y`, and squared distance. Augments apply init-time deltas to `Unit.maxHp`/`hp`/`armor`/
+`moveSpeed`, and of those, only `hp`/`maxHp` are ever read by the encoder — as *values*, not as a new field.
+An augmented unit's `hp`/`maxHp` just carry different (still integer) numbers through the same slots; the
+field order, field count, and the per-skill cooldown layout are all unchanged by the augment primitive in
+isolation. `armor` and `moveSpeed` are not observation fields at all today, so augmenting them changes
+nothing about the encoder's layout either.
+
+**By the batch as a whole: yes — this document's earlier draft was wrong to call the batch "not affected,"**
+and that error is corrected here rather than silently fixed, since it was checked off in the guardrail
+checklist below. The augment-only analysis above answered a narrower question than the one the guardrail
+checklist actually claims to answer ("is `OBS_ENCODING_VERSION` affected [by this batch]"). The batch also
+proposes 4 new Skills (items 3-6), and those grow the compiled-in skill catalog
+(`packages/core/src/content/data/skills.ts`, re-exported as `skills` and imported into `observation.ts` as
+`skillCatalog`) from 6 entries to 10. `observation.ts`'s own constants make the consequence mechanical, not
+a matter of interpretation:
+
+```ts
+// packages/core/src/sim/observation.ts:44-45
+export const OBS_SELF_SKILL_COOLDOWN_START_INDEX = 5;
+export const OBS_SELF_FIELD_COUNT = OBS_SELF_SKILL_COOLDOWN_START_INDEX + skillCatalog.length;
+```
+
+`OBS_SELF_FIELD_COUNT` is derived directly from `skillCatalog.length`, so it grows from `5 + 6 = 11` today to
+`5 + 10 = 15` once all 4 new Skills exist, for **every** unit's self-block, regardless of which Skills that
+particular unit has equipped — the self-block layout is intentionally build-independent so any two units are
+comparable slot-for-slot (see the field's own comment, `observation.ts:37-43`). A field-count change to a
+layout that has already shipped is exactly the case the file's header calls out:
+
+> OBS_ENCODING_VERSION is the parity ground truth for every future exported policy ... once a version ships,
+> ANY layout change here (field order, field count, the action tag table) is a breaking migration and must
+> bump this constant. — `observation.ts:11-14`
+
+This is triggered by catalog growth **alone**, independent of the `RULESET_VERSION` question above: it fires
+for the two reuse-only Skills (items 3, 4, Piercing Shot and Battle Cry) exactly as it does for the two
+new-primitive Skills (items 5, 6, Crippling Strike and Rally), because all four are new rows appended to
+`skills.ts` regardless of which effect/status kinds they use. **Conclusion: the recommended batch requires
+an `OBS_ENCODING_VERSION` bump, v1 -> v2, as soon as any of the 4 new Skills lands** — this is in addition
+to, and independent of, the `RULESET_VERSION` v2 -> v3 bump priced above for the augment/status-kind engine
+primitives.
+
+**Is the action tag table affected too?** Checked, per the header's explicit mention of "the action tag
+table" as a breaking-migration trigger. The *kind-code* table itself
+(`ACTION_KIND_IDLE`/`MOVE`/`MOVE_TOWARD`/`ATTACK`/`CAST` = `0..4`, `observation.ts:145-149`) is a fixed
+5-entry table unrelated to catalog size — it is **not** affected by catalog growth; the 5 action kinds stay
+the same before and after this batch. What *is* catalog-sized is a `cast` action's `skillIndex` payload
+(tuple slot `p3`): `encodeAction` computes it as `skillCatalog.findIndex(...)` (`observation.ts:162`) and
+`decodeAction` reads it back as `skillCatalog[p3]` (`observation.ts:213`), so its valid range widens from
+`0..5` to `0..9`. That same catalog list is duplicated byte-for-byte on the Python side —
+`gym/warwright_gym/actions.py`'s `SKILL_CATALOG` constant, whose own header states `gym/tests/
+test_protocol_golden.py` "cross-checks this list EXACTLY (order and all, not just length) against the
+TS-generated fixture" (`gym/tests/fixtures/protocol_golden.json`, produced by `pnpm --filter
+@warwright/gym-bridge gen-fixture`) — so growing the catalog also requires updating that Python list (to
+add the 4 new skill ids in catalog order) and regenerating that fixture in the same change, not just bumping
+a version number.
+
+**Honest cost of the `OBS_ENCODING_VERSION` bump.** Folded into the same honest-cost accounting as the
+`RULESET_VERSION` bump above, since both are triggered by this same recommended batch:
+
+1. `OBS_ENCODING_VERSION` bump, v1 -> v2 (`packages/core/src/sim/observation.ts:20`), the moment any of the
+   4 new Skills is added to `skills.ts`.
+2. **Ripple onto `policySmokeV1`, and it is a *build-breaking* ripple, not merely a stale-artifact one.**
+   `packages/core/src/content/behaviors/policy/weights-schema.ts`'s `parsePolicyWeights` throws if
+   `weights.obsEncodingVersion !== OBS_ENCODING_VERSION` (`weights-schema.ts:73-78`), and this check runs at
+   **module load**, not at Behavior-selection time: `policySmokeV1Weights` is computed as a top-level
+   `parsePolicyWeights(policySmokeV1WeightsJson)` call (`weights-schema.ts:86`), and `policySmokeV1` is
+   re-exported from `content/behaviors/index.ts`'s registered-Behaviors barrel. So bumping
+   `OBS_ENCODING_VERSION` to 2 without also updating the committed
+   `policy-smoke-v1.weights.json` (still pinned to `obsEncodingVersion: 1`) does not just make that one
+   Behavior unselectable — it throws as soon as anything imports the core package's Behaviors barrel,
+   breaking the build for every runtime (CLI, web, server) until resolved. This must be treated as a
+   same-commit blocking dependency of the catalog-growth + encoder-bump slice, not a follow-up.
+   - **Recommend: deprecate/unregister `policySmokeV1` in the same commit as the bump**, rather than
+     re-export/re-train it immediately. Rationale: re-training and re-exporting a policy is a full
+     Python/gym round-trip (a PPO training run through `gym/`, `export_policy.py`, a new parity fixture) —
+     disproportionate work to gate a content-catalog batch on. The encoder-migration slice's job is to keep
+     the build green through the layout change, not to retrain a policy; re-export can land as independent
+     follow-up work, at any later time, against the new `OBS_ENCODING_VERSION = 2` encoding, using the
+     existing `gym/EXPORT.md` pipeline unchanged. The alternative (re-export inline) is not recommended
+     because it would silently balloon this batch's scope from a data-only content change into an ML
+     training task with its own nondeterminism-adjacent surface (training runs, not sim ticks) to review.
+   - Deprecating means: remove the `policySmokeV1` export from `content/behaviors/index.ts` so it is no
+     longer a selectable Behavior, and quarantine (move out of the loaded module graph, or delete pending a
+     follow-up re-export issue) `policy-smoke-v1.weights.json`, its parity fixture, and its dedicated tests
+     so the module-load-time check in `weights-schema.ts` has nothing stale to validate against.
+3. **Affected artifacts, named explicitly:**
+   - `packages/core/src/content/behaviors/policy/policy-smoke-v1.weights.json` — the pinned weights JSON
+     (`obsEncodingVersion: 1`), deprecated per above.
+   - `packages/core/src/content/behaviors/policy/inference-parity.fixture.json` — the TS-side inference
+     parity fixture, captured against v1 observations; stale under v2 and removed/deprecated alongside the
+     weights.
+   - `gym/tests/fixtures/protocol_golden.json` — the gym-side protocol fixture; regenerated via `pnpm
+     --filter @warwright/gym-bridge gen-fixture` once the full 10-entry catalog exists.
+   - `gym/warwright_gym/actions.py` — its `SKILL_CATALOG` list (must gain the 4 new skill ids, in catalog
+     order) and its own `OBS_ENCODING_VERSION = 1` mirror constant (bumped to 2), both cross-checked against
+     the regenerated fixture by `gym/tests/test_protocol_golden.py`.
 
 ### Derived #70 split (S/M slices)
 
 This table is written so #70's sub-issues can be filed directly from it:
 
+**Corrected from the original split.** The original draft had a "B. Reuse-only Roles + Skills" slice that
+mixed the 2 new Roles with 2 of the 4 new Skills and marked it independent of Slice A ("can land in parallel
+... needs no new primitive"). That was true for `RULESET_VERSION` but false for `OBS_ENCODING_VERSION`, per
+the corrected analysis above: any of the 4 new Skills grows the catalog and requires the encoder bump, so a
+Skills-containing slice cannot land as a self-contained, dependency-free unit. The split below separates
+Roles (genuinely independent — Roles never touch `observation.ts`) from Skills (which now carry the encoder
+migration as an inseparable part of the same slice, since the fixture regeneration needs the *final* 10-entry
+catalog and doing it more than once per additional skill would be wasted, duplicate work):
+
 | Slice | Size | Scope | Blocked by |
 |---|---|---|---|
 | A. Engine primitives | S | Augment primitive (schema, registry, `UnitBuildSchema.augmentIds`, `init.ts` stat-delta application) **+** stun/root status kind **+** buff (haste/damage-up) status kind, added together to `vocab.ts`/the resolve step. One `RULESET_VERSION` bump (v2->v3), one golden-replay regen, one explanatory commit note. | none (first slice) |
-| B. Reuse-only Roles + Skills | M | 2 new Roles (Skirmisher, Bulwark) + 2 reuse-only Skills (Piercing Shot, Battle Cry) as data-only additions; content-validation tests. | none — can land in parallel with A, since it needs no new primitive |
-| C. New-primitive Skills | M | Crippling Strike (stun/root) + Rally (buff) as data using the new status kinds. | Blocked by: A |
+| B. Reuse-only Roles | S | 2 new Roles (Skirmisher, Bulwark) as data-only additions; content-validation tests. Roles are never observation fields, so this slice touches neither `RULESET_VERSION` nor `OBS_ENCODING_VERSION`. | none — can land in parallel with A |
+| C. Skill catalog + observation-encoder migration | M | All 4 new Skills (Piercing Shot, Battle Cry, Crippling Strike, Rally) added to `skills.ts` together, in the **same** commit as: the `OBS_ENCODING_VERSION` bump (v1->v2), the gym-side mirror update (`gym/warwright_gym/actions.py`'s `SKILL_CATALOG` list + its `OBS_ENCODING_VERSION` constant), the fixture regenerations (`pnpm --filter @warwright/gym-bridge gen-fixture` -> `protocol_golden.json`; the TS `inference-parity.fixture.json`), and the `policySmokeV1` deprecation. Treated as **one atomic slice**, not split by Skill or split from the encoder bump: Crippling Strike and Rally need Slice A's new status kinds to exist as real (not placeholder) content, and the fixture regen needs the full, final catalog to avoid re-running it per Skill. | Blocked by: A |
 | D. Augment content | M | 3 augment instances (Iron Plating, Swift Boots, Vital Surge) registered against the augment primitive. | Blocked by: A |
 | E. Server build-snapshot ripple | S | Extend the server's build-acceptance schema/validation to accept `augmentIds`. | Blocked by: A |
 | F. Web builder UI | M | Warband builder UI surface for selecting augments per unit. | Blocked by: A, D (needs real augment content to populate the picker) |
@@ -140,7 +248,9 @@ This table is written so #70's sub-issues can be filed directly from it:
 **Wellspring boundary note.** #70 excludes the Wellspring objective (#71/#72); #71 is separately blocked by
 #70. If Wellspring's channel-buff effect needs the same positive-buff status kind introduced in Slice A here
 (haste/damage-up), #71 should **reuse** that status kind rather than defining its own — naming it once in
-Slice A avoids two competing "buff" primitives shipping in the same phase.
+Slice A avoids two competing "buff" primitives shipping in the same phase. If Wellspring also introduces any
+new Skill of its own, it inherits the same `OBS_ENCODING_VERSION` consideration described in Slice C above
+(any catalog growth bumps the encoding) and should be priced by whoever specs #71/#72, not assumed free.
 
 ---
 
@@ -215,7 +325,12 @@ here.
 - [x] No pay-to-win: augments are init-time build choices validated the same as Roles/Skills, not a
       purchasable power source — this spike proposes no economy or purchase mechanism at all.
 - [x] No AI-generated raster art recommended (coherence and licensing not shown to be solved).
-- [x] `OBS_ENCODING_VERSION` impact explicitly checked and stated (not affected).
+- [x] `OBS_ENCODING_VERSION` impact explicitly checked and stated: **the batch DOES require a bump, v1 -> v2**
+      (the augment primitive alone does not, but the 4 new Skills grow the skill catalog and widen
+      `OBS_SELF_FIELD_COUNT` from 11 to 15 — a breaking layout change per `observation.ts`'s own header
+      contract), with the resulting ripple onto `policySmokeV1` (recommended: deprecate/unregister, not
+      re-export inline) and the gym-side fixture/mirror regeneration priced above and folded into Slice C of
+      the #70 split.
 
 ## Outputs are recommendations only
 
