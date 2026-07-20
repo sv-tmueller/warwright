@@ -161,7 +161,11 @@ describe.skipIf(!url)('queue routes', () => {
 
   async function getStatus(app: FastifyInstance, user: { cookie: string }) {
     const response = await app.inject({ method: 'GET', url: '/queue', headers: { cookie: user.cookie } });
-    return response.json() as { status: string; matchId?: string; result?: { winner: string } };
+    return response.json() as {
+      status: string;
+      matchId?: string;
+      result?: { winner: string; eventLog: unknown[] };
+    };
   }
 
   it('pairs two players via a batching-window pass: both POSTs are 202, and GET delivers the matched result, persisting exactly one matches row reproducible by re-run', async () => {
@@ -180,6 +184,10 @@ describe.skipIf(!url)('queue routes', () => {
     expect(statusA.status).toBe('matched');
     const matchId = statusA.matchId!;
     expect(['A', 'B', 'draw']).toContain(statusA.result!.winner);
+    // #57's non-empty-eventLog assertion, restored against the GET-delivered
+    // matched result: the web client renders exclusively from this log, so
+    // an empty log here would mean matched results are unreadable by it.
+    expect(statusA.result!.eventLog.length).toBeGreaterThan(0);
 
     const rows = await db
       .select()
@@ -680,13 +688,14 @@ describe.skipIf(!url)('queue routes', () => {
     const userB = await registerUser(app);
     const warbandAId = await saveWarband(app, userA, warbandA);
     // An unsaved/foreign-looking warbandId can't be enqueued (404s before
-    // reaching enqueue()), so to exercise the resolver's own failure path
-    // we instead delete A's warband row out from under an in-flight
-    // pairing: resolveMatch re-validates snapshots against core's
-    // parseWarband at resolve time, but the queue snapshot itself
-    // (warbandRow.data) was already captured at enqueue() — so a more
-    // direct trigger is dropping the `warbands` FK, which resolveMatch's
-    // insert into `matches` depends on for referential integrity.
+    // reaching enqueue()), so to exercise the resolver's own failure path we
+    // instead delete user A's account out from under an in-flight pairing.
+    // `matches` has no foreign key to `warbands` at all (see schema.ts's
+    // `matches` table, ~line 60) — the queue snapshot (warbandRow.data) was
+    // already captured at enqueue() and resolveMatch never re-reads the
+    // `warbands` row. The actual failure path is `matches.user_a_id`'s FK to
+    // `users.id`: once A's account is gone, resolveMatch's insert into
+    // `matches` violates that constraint.
     const warbandBId = await saveWarband(app, userB, warbandB);
 
     await postEnqueue(app, userA, warbandAId);
@@ -706,12 +715,14 @@ describe.skipIf(!url)('queue routes', () => {
     const statusB = await getStatus(app, userB);
     expect(statusB.status).toBe('waiting');
 
-    // Both restorations happening (not just B) re-armed the timer, since
-    // the pool became pairable again the moment a third joiner arrives.
+    // Both restorations (not just B's) already re-armed the timer on their
+    // own — pinned here, before any third joiner exists, so this can't be
+    // mistaken for C's own enqueue re-arming it instead.
+    expect(scheduler.pending).toBe(true);
+
     const userC = await registerUser(app);
     const warbandCId = await saveWarband(app, userC, warbandA);
     await postEnqueue(app, userC, warbandCId);
-    expect(scheduler.pending).toBe(true);
 
     await app.close();
   });

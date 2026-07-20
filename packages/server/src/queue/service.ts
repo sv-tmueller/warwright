@@ -320,10 +320,23 @@ export class QueueService {
     this.armTimerIfPairable();
   }
 
-  /** DELETE /queue: removes a waiting user (204), 404s a user who isn't queued (includes idle and matched-but-unclaimed), 409s a user mid-resolution. */
+  /**
+   * DELETE /queue: removes a waiting user (204), 404s a user who isn't
+   * queued (includes idle and matched-but-unclaimed), 409s a user
+   * mid-resolution. If the removal drops the pool below 2 (no longer
+   * pairable), cancels any pending batching-window timer — otherwise an
+   * idle or lone-waiter pool would be left holding a live timer for a pass
+   * that can produce no pairing, and a pool that becomes pairable again
+   * later would inherit a shortened window instead of a fresh one.
+   */
   dequeue(userId: string): DequeueOutcome {
     if (this.resolving.has(userId)) return 'resolving';
-    if (this.waiting.delete(userId)) return 'removed';
+    if (this.waiting.delete(userId)) {
+      if (this.waiting.size < 2) {
+        this.clearTimer();
+      }
+      return 'removed';
+    }
     return 'not-queued';
   }
 
@@ -332,6 +345,20 @@ export class QueueService {
    * an already-resolved promise if none is in flight), so a caller — tests,
    * mainly, for the K-trigger path where no timer/`fire()` is involved —
    * can `await` the pass to quiescence deterministically.
+   *
+   * Single-pass-in-flight assumption: `pendingPassPromise` is overwritten
+   * by each new `runPass()` call, not chained/queued, so `settled()` only
+   * ever awaits the *latest* pass. This holds by construction today —
+   * `runPass`'s only two callers (the armed timer's callback and the
+   * K-trigger inside `enqueue()`) each fire from their own synchronous
+   * critical section, and neither one can run again until the previous
+   * pass's synchronous pool mutation has already completed — so two passes
+   * never have overlapping async resolver tails in practice. If that ever
+   * changes (e.g. a future trigger that can fire a second pass while an
+   * earlier pass's resolver is still pending), this field would need to
+   * become a chain/queue of promises instead of a single overwritten one,
+   * or `settled()` would silently stop covering an earlier still-in-flight
+   * pass.
    */
   settled(): Promise<void> {
     return this.pendingPassPromise ?? Promise.resolve();

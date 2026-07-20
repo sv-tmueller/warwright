@@ -26,10 +26,13 @@ export interface QueueConfig {
    * tests (queue.test.ts) have no other way to await a pairing pass to
    * quiescence deterministically — Fastify's plugin encapsulation means a
    * decorator added inside this plugin isn't visible on the parent app
-   * instance (see plugins/session.ts's fp() doc comment for the one case
-   * that deliberately opts out of that), and a K-triggered pass never
-   * touches the scheduler at all, so there's no other seam to hook. Never
-   * read by any production route.
+   * instance, and a K-triggered pass never touches the scheduler at all.
+   * There is no other seam short of fp()-wrapping this plugin (see
+   * plugins/session.ts's fp() doc comment for that precedent), which was
+   * rejected here because it would permanently expose the service's
+   * mutators (enqueue/completePairing/failPairing) to every plugin
+   * registered on the app, not just this test hook. Never read by any
+   * production route.
    */
   onQueueServiceCreated?: (queueService: QueueService) => void;
 }

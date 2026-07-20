@@ -194,6 +194,40 @@ describe('QueueService', () => {
       expect(dequeueOutcomes.filter((outcome) => outcome === 'resolving')).toHaveLength(2);
     });
 
+    it('pins the FIFO-by-enqueuedAt sort against Map iteration order: a failPairing restore re-pairs the oldest entry, not the head of the re-inserted Map', async () => {
+      const { resolver, calls } = recordingResolver();
+      const scheduler = createManualScheduler();
+      const service = createQueueService({ resolver, scheduler, windowMs: 100, maxPool: 8 });
+
+      // enqueuedAt order: a (oldest), b, c. Ratings are chosen so pass 1
+      // pairs a-b (nearest to a), leaving c waiting.
+      service.enqueue('a', 1500, { name: 'A' });
+      service.enqueue('b', 1510, { name: 'B' });
+      service.enqueue('c', 1000, { name: 'C' });
+
+      await scheduler.fire();
+      expect(calls).toHaveLength(1);
+      const [firstPairing] = calls[0]!;
+      expect(firstPairing!.userAId).toBe('a');
+      expect(firstPairing!.userBId).toBe('b');
+      expect(service.getStatus('c')).toEqual({ status: 'waiting' });
+
+      // Simulate the resolver failing this pairing: both a and b are
+      // restored via Map.set, landing *after* c in Map iteration order
+      // (c, a, b) even though enqueuedAt order is still a, b, c.
+      service.failPairing(firstPairing!);
+      expect(scheduler.pending).toBe(true); // pool of 3 is pairable again
+
+      await scheduler.fire();
+      expect(calls).toHaveLength(2);
+      const [secondPairing] = calls[1]!;
+      // The pass must pick the oldest entry by enqueuedAt ('a'), not the
+      // Map-iteration-order head ('c'): without the collectPairings sort,
+      // pool[0] would be 'c' and this assertion would fail.
+      expect(secondPairing!.userAId).toBe('a');
+      expect(secondPairing!.userBId).toBe('b');
+    });
+
     it('never double- or self-pairs across a pass over a larger pool', async () => {
       const { resolver, calls } = recordingResolver();
       const scheduler = createManualScheduler();
@@ -415,6 +449,28 @@ describe('QueueService', () => {
       const result = { version: 2, seed: 1, winner: 'A' as const, eventLog: [], hash: 123 };
       service.completePairing(pairing!, 'match-1', result);
       expect(service.dequeue('a')).toBe('not-queued');
+    });
+
+    it('cancels the pending batching-window timer when dequeue drops the pool below 2 (no longer pairable)', () => {
+      const { resolver } = recordingResolver();
+      const scheduler = createManualScheduler();
+      const service = createQueueService({ resolver, scheduler, windowMs: 5000, maxPool: 8 });
+
+      service.enqueue('a', 1500, { name: 'A' });
+      service.enqueue('b', 1520, { name: 'B' });
+      expect(scheduler.pending).toBe(true);
+      expect(scheduler.scheduleCount).toBe(1);
+
+      expect(service.dequeue('a')).toBe('removed');
+      // Only 'b' remains: not pairable, so no timer should still be pending.
+      expect(scheduler.pending).toBe(false);
+
+      // Re-enqueuing to make the pool pairable again arms a fresh window,
+      // not a leftover/shortened one from before the dequeue.
+      service.enqueue('c', 1000, { name: 'C' });
+      expect(scheduler.pending).toBe(true);
+      expect(scheduler.pendingMs).toBe(5000);
+      expect(scheduler.scheduleCount).toBe(2);
     });
   });
 });
