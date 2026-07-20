@@ -1,11 +1,11 @@
 import type { Replay, SteppedTransport } from '../api/seams.js';
-import type { Action } from './behavior.js';
+import type { Action, Behavior } from './behavior.js';
 import { EXTERNAL_BEHAVIOR_ID, MATCH_TICK_CAP } from './constants.js';
 import { emit } from './events.js';
 import { hashEventLog } from './hash.js';
-import { init } from './init.js';
+import { initWithRegistry } from './init.js';
 import { stepTick } from './loop.js';
-import { createSeedRegistry } from './seed-registry.js';
+import { createSeedRegistryWith } from './seed-registry.js';
 import type { ContentRegistry } from '../content/registry.js';
 import type { MatchResult, Winner, WorldState } from './types.js';
 
@@ -18,15 +18,31 @@ export { EXTERNAL_BEHAVIOR_ID };
 // is the literal `while (world.tick < MATCH_TICK_CAP)` condition from the
 // former runMatch, and finalize() is the former lines 19-28 of match.ts,
 // moved verbatim and run EXACTLY ONCE.
-export function createSteppedMatch(replay: Replay): SteppedTransport {
+//
+// `extraBehaviors` (default []) is the #135 core seam: Behaviors registered
+// into the SAME registry stepTick resolves against, in addition to the seed
+// set, via createSeedRegistryWith. With the default empty array this is
+// bit-identical to the former hardcoded createSeedRegistry() call (same
+// Behaviors, same registry construction order), so runMatch/match.ts (which
+// never passes extraBehaviors) is unaffected.
+export function createSteppedMatch(
+  replay: Replay,
+  extraBehaviors: readonly Behavior[] = [],
+): SteppedTransport {
   let world: WorldState;
   let registry: ContentRegistry;
   let winner: Winner | null;
   let finalResult: MatchResult | null;
 
   function resetFrom(nextReplay: Replay): WorldState {
-    world = init(nextReplay.version, nextReplay.seed, nextReplay.buildA, nextReplay.buildB);
-    registry = createSeedRegistry();
+    registry = createSeedRegistryWith(extraBehaviors);
+    world = initWithRegistry(
+      nextReplay.version,
+      nextReplay.seed,
+      nextReplay.buildA,
+      nextReplay.buildB,
+      registry,
+    );
     winner = null;
     finalResult = null;
     return world;

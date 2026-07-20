@@ -4,9 +4,11 @@ import eslintConfigPrettier from 'eslint-config-prettier';
 import reactHooks from 'eslint-plugin-react-hooks';
 
 // sim/ determinism enforcement. Keep this token list in sync with the
-// forbidden-token regexes in packages/core/src/determinism-scan.test.ts:
-// lint gives fast feedback, the scan test is the exhaustive belt (it also
-// covers sim/*.test.ts and catches escapes like globalThis.crypto).
+// forbidden-token regexes in packages/core/src/purity-tokens.ts (consumed by
+// determinism-scan.test.ts and, per #135, packages/foundry's stage-2 static
+// purity scan): lint gives fast feedback, the scan test is the exhaustive
+// belt (it also covers sim/*.test.ts and catches escapes like
+// globalThis.crypto).
 const NON_DETERMINISTIC_MATH_PROPERTIES = [
   'sqrt',
   'cbrt',
@@ -63,7 +65,17 @@ const FORBIDDEN_NODE_IMPORTS = [
 
 export default tseslint.config(
   {
-    ignores: ['**/dist/**', '**/node_modules/**', '**/coverage/**'],
+    // packages/foundry/fixtures/** deliberately contains malformed
+    // manifests and impure/forbidden-token submissions (see #135): they
+    // exist to be REJECTED by the foundry gate's own tests, not to pass
+    // generic lint. packages/foundry/submissions/** stays linted (it's
+    // meant to be clean, gate-passing sample code).
+    ignores: [
+      '**/dist/**',
+      '**/node_modules/**',
+      '**/coverage/**',
+      'packages/foundry/fixtures/**',
+    ],
   },
   js.configs.recommended,
   tseslint.configs.recommended,
