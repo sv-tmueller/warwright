@@ -98,26 +98,32 @@ function encodeUnitBlock(other: Unit, self: Unit): number[] {
 // Fixed-order flat observation vector for `unitId`: the self block (hp,
 // maxHp, pos, attack cooldown, per-catalog-skill cooldowns), then one block
 // per ALLY in ascending id order (excluding self), then one block per ENEMY
-// in ascending id order. `world.units` is already ascending-id ordered (see
+// in ascending id order. `units` is expected ascending-id ordered (see
 // sim/types.ts) and dead units (hp <= 0) are never removed from it, so a
 // given match's observation length is constant across every tick of that
-// match, win or lose.
-export function encodeObservation(world: WorldState, unitId: number): number[] {
-  const self = world.units.find((unit) => unit.id === unitId);
+// match, win or lose. Units-array-level so callers that only have a live
+// `Unit[]` (not a full `WorldState`) -- e.g. sim/loop.ts's `WorldView.
+// observationOf` seam -- can reuse this without constructing one.
+export function encodeObservationFromUnits(units: readonly Unit[], unitId: number): number[] {
+  const self = units.find((unit) => unit.id === unitId);
   if (self === undefined) {
-    throw new Error(`encodeObservation: no unit with id ${unitId}`);
+    throw new Error(`encodeObservationFromUnits: no unit with id ${unitId}`);
   }
 
   const vector = encodeSelfBlock(self);
-  for (const unit of world.units) {
+  for (const unit of units) {
     if (unit.id === self.id || unit.team !== self.team) continue;
     vector.push(...encodeUnitBlock(unit, self));
   }
-  for (const unit of world.units) {
+  for (const unit of units) {
     if (unit.team === self.team) continue;
     vector.push(...encodeUnitBlock(unit, self));
   }
   return vector;
+}
+
+export function encodeObservation(world: WorldState, unitId: number): number[] {
+  return encodeObservationFromUnits(world.units, unitId);
 }
 
 // Tagged integer tuple encoding for the Action union (sim/behavior.ts).

@@ -15,6 +15,7 @@ import {
   decodeAction,
   encodeAction,
   encodeObservation,
+  encodeObservationFromUnits,
 } from './observation.js';
 
 const VERSION = 1;
@@ -130,6 +131,18 @@ describe('encodeObservation', () => {
 
     const after = encodeObservation(world, 0).length;
     expect(after).toBe(before);
+  });
+});
+
+describe('encodeObservationFromUnits', () => {
+  it('is what the public encodeObservation delegates to (behavior-preserving extraction)', () => {
+    const world = init(VERSION, SEED, buildA, buildB);
+    expect(encodeObservationFromUnits(world.units, 0)).toEqual(encodeObservation(world, 0));
+  });
+
+  it('throws for an unknown unit id, same as encodeObservation', () => {
+    const world = init(VERSION, SEED, buildA, buildB);
+    expect(() => encodeObservationFromUnits(world.units, 999)).toThrow(/999/);
   });
 });
 

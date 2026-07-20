@@ -107,6 +107,9 @@ describe('createContentRegistry', () => {
     const worldWithEnemies: WorldView = {
       alliesOf: () => [],
       enemiesOf: () => [lowestEnemy, otherEnemy],
+      observationOf: () => {
+        throw new Error('observationOf unused in this test');
+      },
     };
     expect(
       registry
@@ -120,6 +123,9 @@ describe('createContentRegistry', () => {
     const worldWithoutEnemies: WorldView = {
       alliesOf: () => [],
       enemiesOf: () => [],
+      observationOf: () => {
+        throw new Error('observationOf unused in this test');
+      },
     };
     expect(
       registry
