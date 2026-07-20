@@ -1,7 +1,13 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { Behavior } from '@warwright/core';
+import { loadSubmission } from './load.js';
 import { parseSubmissionManifest } from './manifest.js';
-import { runStage3Stub } from './stage3.js';
+import { BASELINE_WIN_RATE_THRESHOLD, runStage3 } from './stage3.js';
+
+const SUBMISSIONS_DIR = fileURLToPath(new URL('../submissions/', import.meta.url));
+const FIXTURES_DIR = fileURLToPath(new URL('../fixtures/', import.meta.url));
 
 const manifest = parseSubmissionManifest('sample-aggro', {
   id: 'sample-aggro',
@@ -12,18 +18,47 @@ const manifest = parseSubmissionManifest('sample-aggro', {
   shape: 'general',
 });
 
-describe('runStage3Stub', () => {
-  it('reports a not-implemented stub result for a fully-gated submission', () => {
-    const behavior: Behavior = { id: 'sample-aggro', decide: () => ({ kind: 'idle' }) };
-
-    const result = runStage3Stub(manifest, behavior);
-
-    expect(result).toEqual({ stage: 3, status: 'not-implemented', submissionId: 'sample-aggro' });
+describe('BASELINE_WIN_RATE_THRESHOLD', () => {
+  it('is a fraction strictly between 0 and 1', () => {
+    expect(BASELINE_WIN_RATE_THRESHOLD).toBeGreaterThan(0);
+    expect(BASELINE_WIN_RATE_THRESHOLD).toBeLessThan(1);
   });
+});
 
+describe('runStage3', () => {
   it('throws when the Behavior id does not match the manifest id', () => {
     const mismatched: Behavior = { id: 'someone-else', decide: () => ({ kind: 'idle' }) };
 
-    expect(() => runStage3Stub(manifest, mismatched)).toThrow(/stage 3/i);
+    expect(() => runStage3(manifest, mismatched)).toThrow(/stage 3/i);
+  });
+
+  it('clears the bar for submissions/sample-aggro (rule-based, general shape)', async () => {
+    const { manifest: loadedManifest, behavior } = await loadSubmission(
+      path.join(SUBMISSIONS_DIR, 'sample-aggro'),
+    );
+
+    const result = runStage3(loadedManifest, behavior);
+
+    expect(result.status).toBe('pass');
+    expect(result.winRate).toBeGreaterThanOrEqual(BASELINE_WIN_RATE_THRESHOLD);
+  });
+
+  it('clears the bar for submissions/sample-policy (exported policy, 1v1 shape)', async () => {
+    const { manifest: loadedManifest, behavior } = await loadSubmission(
+      path.join(SUBMISSIONS_DIR, 'sample-policy'),
+    );
+
+    const result = runStage3(loadedManifest, behavior);
+
+    expect(result.status).toBe('pass');
+    expect(result.winRate).toBeGreaterThanOrEqual(BASELINE_WIN_RATE_THRESHOLD);
+  });
+
+  it('rejects fixtures/weak-idle at stage 3: win rate ~0, below the bar', async () => {
+    const { manifest: loadedManifest, behavior } = await loadSubmission(
+      path.join(FIXTURES_DIR, 'weak-idle'),
+    );
+
+    expect(() => runStage3(loadedManifest, behavior)).toThrow(/stage 3/i);
   });
 });
