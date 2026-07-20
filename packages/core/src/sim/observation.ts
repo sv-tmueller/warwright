@@ -139,11 +139,14 @@ export function encodeObservation(world: WorldState, unitId: number): number[] {
 //   cast:         [4, targetId, 0,    skillIndex]  (skillIndex: skill
 //                                                    catalog position, see
 //                                                    skillCatalog above)
-const ACTION_KIND_IDLE = 0;
-const ACTION_KIND_MOVE = 1;
-const ACTION_KIND_MOVE_TOWARD = 2;
-const ACTION_KIND_ATTACK = 3;
-const ACTION_KIND_CAST = 4;
+// Exported so content/behaviors/policy/policy-smoke-v1.ts (the exported
+// inference Behavior) can build a wire action tuple from an inferred
+// component kind without a duplicated magic-number table.
+export const ACTION_KIND_IDLE = 0;
+export const ACTION_KIND_MOVE = 1;
+export const ACTION_KIND_MOVE_TOWARD = 2;
+export const ACTION_KIND_ATTACK = 3;
+export const ACTION_KIND_CAST = 4;
 
 export function encodeAction(action: Action): number[] {
   switch (action.kind) {
