@@ -79,7 +79,8 @@ describe('loadSubmission', () => {
       'behavior.ts': `export const notABehavior = 'just a string';`,
     });
 
-    await expect(loadSubmission(dir)).rejects.toThrow(/behavior/i);
+    await expect(loadSubmission(dir)).rejects.toThrow(/stage 1 \(entry/i);
+    await expect(loadSubmission(dir)).rejects.toThrow(/does not export a Behavior/i);
   });
 
   it('rejects a submission at stage 2 (static) before ever importing its entry', async () => {

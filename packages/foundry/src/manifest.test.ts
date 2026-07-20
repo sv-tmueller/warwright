@@ -33,7 +33,7 @@ describe('parseSubmissionManifest (stage 1)', () => {
   it('rejects a manifest with the wrong shape', () => {
     const bad = { ...validManifest, shape: 'duel' };
 
-    expect(() => parseSubmissionManifest('sample-aggro', bad)).toThrow();
+    expect(() => parseSubmissionManifest('sample-aggro', bad)).toThrow(/stage 1 \(manifest\)/i);
   });
 
   it('rejects when the manifest id does not match the submission directory name', () => {
