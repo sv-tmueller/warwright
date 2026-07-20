@@ -49,6 +49,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+import torch
+
 from warwright_gym.env import EXTERNAL_BEHAVIOR_ID, WarwrightVectorEnv
 from warwright_gym.observation import compute_observation_length
 from warwright_gym.rewards import RewardConfig, RewardShapingWrapper
@@ -120,12 +122,25 @@ def _eval_result_summary(result: EvalResult) -> dict[str, Any]:
     }
 
 
-def run_smoke(config: PPOConfig, *, node: str = "node") -> dict[str, Any]:
+def run_smoke(
+    config: PPOConfig,
+    *,
+    node: str = "node",
+    bridge_path: Path | None = None,
+    save_checkpoint_path: Path | None = None,
+) -> dict[str, Any]:
     """Runs the full eval-train-eval loop and returns the JSON-serializable
     report described in this module's docstring. Constructs three separate
     `WarwrightVectorEnv`s (before-eval, train, after-eval) so the
     before/after evaluations use a FRESH bridge subprocess each, matching
-    how `evaluate()`'s pinned-seed protocol is meant to be called."""
+    how `evaluate()`'s pinned-seed protocol is meant to be called.
+
+    If `save_checkpoint_path` is given, `torch.save`s the TRAINED policy's
+    `state_dict` (actor + critic; #131's `export_policy.py` strips the
+    critic for the committed weights artifact) there once training
+    finishes, before the after-eval runs -- #65 left this step out
+    entirely (this function only printed a report); #131 is the first
+    caller that needs a persisted checkpoint to export from."""
     build_a = smoke_build_a()
     build_b = smoke_build_b()
     num_allies = len(build_a["units"]) - 1
@@ -141,6 +156,7 @@ def run_smoke(config: PPOConfig, *, node: str = "node") -> dict[str, Any]:
         build_a=build_a,
         build_b=build_b,
         ticks_per_step=config.ticks_per_step,
+        bridge_path=bridge_path,
         node=node,
     )
     try:
@@ -159,6 +175,7 @@ def run_smoke(config: PPOConfig, *, node: str = "node") -> dict[str, Any]:
             build_a=build_a,
             build_b=build_b,
             ticks_per_step=config.ticks_per_step,
+            bridge_path=bridge_path,
             node=node,
         ),
         config.reward_config,
@@ -169,11 +186,16 @@ def run_smoke(config: PPOConfig, *, node: str = "node") -> dict[str, Any]:
     finally:
         train_env.close()
 
+    if save_checkpoint_path is not None:
+        save_checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(trained_policy.state_dict(), save_checkpoint_path)
+
     after_env = WarwrightVectorEnv(
         EVAL_BATCH_SIZE,
         build_a=build_a,
         build_b=build_b,
         ticks_per_step=config.ticks_per_step,
+        bridge_path=bridge_path,
         node=node,
     )
     try:
@@ -210,6 +232,16 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--ally-hp-weight", type=float, default=RewardConfig().ally_hp_weight)
     parser.add_argument("--output-json", type=Path, default=None)
+    parser.add_argument(
+        "--save-checkpoint",
+        type=Path,
+        default=None,
+        help=(
+            "Path to torch.save the trained policy's state_dict to (#131's "
+            "export_policy.py converts this into the committed weights JSON). "
+            "Not written by default."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -226,7 +258,7 @@ def main() -> None:
             ally_hp_weight=args.ally_hp_weight,
         ),
     )
-    report = run_smoke(config)
+    report = run_smoke(config, save_checkpoint_path=args.save_checkpoint)
     text = json.dumps(report, indent=2)
     print(text)
     if args.output_json is not None:
