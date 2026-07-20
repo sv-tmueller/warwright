@@ -38,12 +38,21 @@ describe('inferActionComponents parity (argmax-level, per case)', () => {
 // fixed observations, pinned as literal numbers. A future TS refactor that
 // still passes every argmax case above but subtly perturbs the arithmetic
 // (e.g. reordering a dot-product loop) would still be caught here. Only the
-// `kind` (nvec[0]=5) and `skillIndex` (nvec[2]=6) segments are pinned, not
-// the full 2014-wide flat vector (dominated by the two 1001-wide move_x/
-// move_y segments) -- see nvec = [5, 1, 6, 1001, 1001].
-const KIND_SEGMENT_END = 5;
-const SKILL_SEGMENT_START = 6; // 5 (kind) + 1 (targetSlot)
-const SKILL_SEGMENT_END = 12; // + 6 (skillIndex)
+// `kind` (nvec[0]) and `skillIndex` (nvec[2]) segments are pinned, not the
+// full 2014-wide flat vector (dominated by the two 1001-wide move_x/move_y
+// segments) -- see nvec = [5, 1, 6, 1001, 1001]. The segment boundaries are
+// derived below (cumulative sums of nvec) rather than hardcoded, so they
+// can't silently drift from the actual network's nvec.
+function nthCumulativeSum(nvec: readonly number[], index: number): number {
+  const sum = nvec.slice(0, index + 1).reduce((total, size) => total + size, 0);
+  if (index >= nvec.length) {
+    throw new Error(`nthCumulativeSum: index ${index} is out of range for nvec of length ${nvec.length}`);
+  }
+  return sum;
+}
+const KIND_SEGMENT_END = nthCumulativeSum(policySmokeV1Weights.nvec, 0); // end of the kind segment
+const SKILL_SEGMENT_START = nthCumulativeSum(policySmokeV1Weights.nvec, 1); // + targetSlot
+const SKILL_SEGMENT_END = nthCumulativeSum(policySmokeV1Weights.nvec, 2); // + skillIndex
 
 describe('computeActorLogits TS-only snapshot pin', () => {
   it.each([

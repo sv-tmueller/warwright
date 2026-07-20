@@ -15,7 +15,10 @@ const LinearLayerSchema = z.strictObject({
 });
 
 export const PolicyWeightsSchema = z.strictObject({
-  formatVersion: z.number(),
+  // Pinned to the current export format (see gym/EXPORT.md's "TS mirror
+  // contract"). A future format-2 export with changed semantics must fail
+  // loud at load rather than parse silently under the wrong assumptions.
+  formatVersion: z.literal(1),
   behaviorId: z.string().min(1),
   obsEncodingVersion: z.number(),
   obsDim: z.int().positive(),

@@ -23,6 +23,13 @@
 // absolute error) across the entire unclamped domain; the reference value
 // at x=20 itself already rounds to exactly 1.0 in float64, so clamping
 // there loses no precision.
+//
+// Note: because this is a truncated approximation rather than an exact
+// clamp, the output can exceed +-1 by up to 1 ULP (Number.EPSILON) at some
+// saturated (but not yet CLAMP_THRESHOLD-clamped) inputs. That excess is
+// harmless: it only feeds further multiplications, is far below the export
+// fixture's >= 0.01 near-tie argmax margin, and doesn't affect determinism
+// (still exact float64) or which component wins argmax.
 const TERMS = 32;
 export const CLAMP_THRESHOLD = 20;
 

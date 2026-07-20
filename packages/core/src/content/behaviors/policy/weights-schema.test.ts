@@ -95,6 +95,12 @@ describe('parsePolicyWeights', () => {
   it('fails loud on a structurally invalid object (Zod validation)', () => {
     expect(() => parsePolicyWeights({})).toThrow();
   });
+
+  it('fails loud when formatVersion is not the pinned literal 1 (e.g. a future format-2 export)', () => {
+    const data = validWeights() as { formatVersion: number };
+    data.formatVersion = 2;
+    expect(() => parsePolicyWeights(data)).toThrow();
+  });
 });
 
 describe('policySmokeV1Weights (the committed artifact, validated at module load)', () => {
