@@ -68,6 +68,27 @@ describe('scanSubmissionDirStatic (stage 2, static)', () => {
     expect(() => scanSubmissionDirStatic(path.join(SUBMISSIONS_DIR, 'sample-aggro'))).not.toThrow();
   });
 
+  it('rejects a dynamic import(...) with a computed (non string-literal) specifier', () => {
+    const dir = makeTempSubmissionDir({
+      'behavior.ts': `
+        const modulePath = 'node:fs';
+        void import(modulePath);
+      `,
+    });
+
+    expect(() => scanSubmissionDirStatic(dir)).toThrow(/stage 2 \(static/i);
+  });
+
+  it('rejects a dynamic import(...) built from a string-concatenation expression', () => {
+    const dir = makeTempSubmissionDir({
+      'behavior.ts': `
+        void import('node:' + 'fs');
+      `,
+    });
+
+    expect(() => scanSubmissionDirStatic(dir)).toThrow(/stage 2 \(static/i);
+  });
+
   it('rejects a submission dir containing a stray non-.ts, non-manifest.json file', () => {
     const dir = makeTempSubmissionDir({
       'manifest.json': '{}',

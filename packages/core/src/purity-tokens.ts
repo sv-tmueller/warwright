@@ -22,12 +22,31 @@ export const FORBIDDEN_NODE_IMPORT =
 
 export const FORBIDDEN_REQUIRE = /\brequire\(/;
 
+// Cheap-evasion hardening (Fix 3, review of PR #136): eval and `new
+// Function(...)` are direct code-execution primitives that bypass every
+// other token/import check below them; a `.constructor.constructor` (or any
+// `constructor` chain) is the standard trick for reaching the Function
+// constructor without ever spelling "Function" in source, e.g.
+// `(() => {}).constructor.constructor('return Math.random()')()`.
+export const FORBIDDEN_EVAL = /\beval\(/;
+export const FORBIDDEN_NEW_FUNCTION = /\bnew\s+Function\s*\(/;
+export const FORBIDDEN_CONSTRUCTOR_CHAIN = /\.constructor(?:\s*\.\s*constructor|\s*\[\s*['"]constructor['"]\s*\])/;
+
 /**
  * Runs every FORBIDDEN_* regex above against `contents` and returns a
  * human-readable reason string for each one that matches. Shared by
  * determinism-scan.test.ts (first-party sim/ + content/behaviors/ code) and
  * packages/foundry's stage-2 static scan (third-party submission code), so
  * both consumers report identically-worded violations for the same input.
+ *
+ * This is a text-based, exhaustive-but-not-airtight belt, not a full static
+ * analyzer: computed member access via a non-literal string (e.g.
+ * `Math[randomKey()]`, `globalThis['Math']`) is not caught by these
+ * regexes. For sim/ and content/behaviors/ (first-party code, backstopped
+ * by lint + code review) that residual gap is acceptable. For a foundry
+ * submission (packages/foundry/src/purity.ts) it means this scan is a
+ * cooperative-CI gate against accidental non-determinism, not a hostile
+ * sandbox against a deliberately adversarial submitter.
  */
 export function findForbiddenTokenViolations(contents: string): string[] {
   const violations: string[] = [];
@@ -35,5 +54,10 @@ export function findForbiddenTokenViolations(contents: string): string[] {
   if (FORBIDDEN_GLOBALS.test(contents)) violations.push('forbidden host global');
   if (FORBIDDEN_NODE_IMPORT.test(contents)) violations.push('forbidden Node import');
   if (FORBIDDEN_REQUIRE.test(contents)) violations.push('require()');
+  if (FORBIDDEN_EVAL.test(contents)) violations.push('eval()');
+  if (FORBIDDEN_NEW_FUNCTION.test(contents)) violations.push('new Function()');
+  if (FORBIDDEN_CONSTRUCTOR_CHAIN.test(contents)) {
+    violations.push('constructor-chain (used to reach Function without naming it)');
+  }
   return violations;
 }

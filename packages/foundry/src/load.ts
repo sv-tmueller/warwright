@@ -49,11 +49,14 @@ function findBehaviorExport(mod: Record<string, unknown>, expectedId: string): B
  * Loads a submission end to end: stage 1 (locate + parse manifest.json),
  * then -- ONLY if stage 2's static scan passes -- stage 1's remaining step,
  * dynamic-importing the entry module and structurally checking it exports a
- * Behavior whose id matches the manifest. A forbidden-import submission
- * (stage 2 static) is therefore NEVER executed: its module code never runs.
- * (Stage 2's runtime idempotence check and stage 3 are the caller's
- * responsibility -- see purity.ts / stage3.ts / gate.ts -- since they need
- * the loaded Behavior, not just the manifest.)
+ * Behavior whose id matches the manifest. A submission rejected by stage
+ * 2's static scan (a literal, statically-visible forbidden token or import)
+ * is therefore never executed: its module code never runs. That scan is a
+ * text-based, exhaustive-but-not-airtight belt (see purity.ts's doc
+ * comment) -- a cooperative-CI gate against accidental non-determinism, not
+ * a hostile-input sandbox. (Stage 2's runtime idempotence check and stage 3
+ * are the caller's responsibility -- see purity.ts / stage3.ts / gate.ts --
+ * since they need the loaded Behavior, not just the manifest.)
  */
 export async function loadSubmission(dir: string): Promise<LoadedSubmission> {
   const dirName = path.basename(dir);

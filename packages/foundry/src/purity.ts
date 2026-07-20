@@ -72,12 +72,39 @@ function isAllowedImport(specifier: string, fileDir: string, submissionRoot: str
   return relativeToRoot !== '' && !relativeToRoot.startsWith('..') && !path.isAbsolute(relativeToRoot);
 }
 
+// Every `import(...)` call site, whatever its argument looks like. Used to
+// find dynamic imports whose specifier ISN'T a plain string literal (e.g.
+// `import(v)`, `import('f' + 's')`, `import(getPath())`) -- those bypass
+// the specifier-based allowlist above entirely, since there is no literal
+// text to check, so any such call is rejected outright rather than
+// silently let through (Fix 3, review of PR #136).
+const DYNAMIC_IMPORT_CALL_RE = /\bimport\s*\(([^()]*)\)/g;
+const STRING_LITERAL_ARG_RE = /^\s*['"][^'"]*['"]\s*$/;
+
+function findDynamicImportViolations(contents: string, relativePath: string): string[] {
+  const violations: string[] = [];
+  for (const match of contents.matchAll(DYNAMIC_IMPORT_CALL_RE)) {
+    const arg = match[1] ?? '';
+    if (!STRING_LITERAL_ARG_RE.test(arg)) {
+      violations.push(
+        `${relativePath}: dynamic import(...) with a non string-literal specifier is not allowed`,
+      );
+    }
+  }
+  return violations;
+}
+
 /**
  * Stage 2, static half: recursively scans every .ts file under `dir` for
  * forbidden tokens (reusing core's purity-tokens.ts, the same list
  * determinism-scan.test.ts enforces on first-party code) and enforces the
  * import allowlist. Runs BEFORE the submission's entry is ever dynamically
- * imported (see load.ts) -- a forbidden-import submission never executes.
+ * imported (see load.ts) -- a submission whose forbidden import is a
+ * literal, statically-visible specifier never executes. This is a text
+ * scan, not a compiler: computed member access that isn't caught by these
+ * regexes (e.g. `Math['random']`) could still slip through. Treat this gate
+ * as a cooperative-CI check against accidental non-determinism, not a
+ * hostile-input sandbox.
  */
 export function scanSubmissionDirStatic(dir: string): void {
   const violations: string[] = [];
@@ -96,6 +123,8 @@ export function scanSubmissionDirStatic(dir: string): void {
         violations.push(`${relativePath}: disallowed import "${specifier}"`);
       }
     }
+
+    violations.push(...findDynamicImportViolations(contents, relativePath));
   }
 
   if (violations.length > 0) {
