@@ -1,13 +1,17 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { findForbiddenTokenViolations } from './purity-tokens.js';
 
 // Exhaustive belt behind the sim/ ESLint override in eslint.config.js. This
 // test lives outside sim/ (deviation logged in the P0-02 sub-plan) because it
 // needs fs, which the override forbids inside sim/. It reads every file
 // under each SCANNED_DIR (including tests) as plain text and fails on any
 // forbidden token, catching what lint misses: globalThis-style escapes and
-// stray tokens in comments. Keep these regexes in sync with the override's
+// stray tokens in comments. The FORBIDDEN_* regexes live in purity-tokens.ts
+// (see #135) so packages/foundry's stage-2 static scan can reuse the exact
+// same lists; keep purity-tokens.ts in sync with eslint.config.js's
+// no-restricted-globals / no-restricted-properties / no-restricted-imports
 // lists.
 //
 // content/behaviors/** was added for #66 (per the #66 SUB_PLAN's "guard
@@ -23,26 +27,6 @@ const SCANNED_DIRS = [
   },
 ];
 
-const FORBIDDEN_MATH =
-  /\bMath\.(random|sqrt|cbrt|pow|exp|expm1|log|log1p|log2|log10|sin|cos|tan|asin|acos|atan|atan2|sinh|cosh|tanh|asinh|acosh|atanh|hypot|fround)\b/;
-
-const FORBIDDEN_GLOBALS =
-  /\b(Date|performance|crypto|document|window|navigator|fetch|XMLHttpRequest|WebSocket|requestAnimationFrame|localStorage|sessionStorage|globalThis|process)\b/;
-
-const FORBIDDEN_NODE_IMPORT =
-  /from\s+['"](?:node:[^'"]+|fs|path|os|crypto|http|https|net|tls|dns|dgram|child_process|worker_threads|cluster|perf_hooks|util|stream|zlib|readline|vm|inspector|async_hooks|events|buffer|process)['"]/;
-
-const FORBIDDEN_REQUIRE = /\brequire\(/;
-
-function findViolations(contents: string): string[] {
-  const violations: string[] = [];
-  if (FORBIDDEN_MATH.test(contents)) violations.push('forbidden Math member');
-  if (FORBIDDEN_GLOBALS.test(contents)) violations.push('forbidden host global');
-  if (FORBIDDEN_NODE_IMPORT.test(contents)) violations.push('forbidden Node import');
-  if (FORBIDDEN_REQUIRE.test(contents)) violations.push('require()');
-  return violations;
-}
-
 describe('determinism scan', () => {
   it.each(SCANNED_DIRS)('finds no forbidden tokens anywhere under $name/', ({ name, path }) => {
     const files = readdirSync(path, { recursive: true, encoding: 'utf8' }).filter((entry) =>
@@ -53,7 +37,7 @@ describe('determinism scan', () => {
 
     const offenders = files.flatMap((file) => {
       const contents = readFileSync(`${path}${file}`, 'utf8');
-      return findViolations(contents).map((reason) => `${name}/${file}: ${reason}`);
+      return findForbiddenTokenViolations(contents).map((reason) => `${name}/${file}: ${reason}`);
     });
 
     expect(offenders).toEqual([]);
