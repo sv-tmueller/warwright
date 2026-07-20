@@ -1,7 +1,9 @@
-// Property tests only -- NO Math.tanh reference here (this file lives under
-// the determinism-scanned content/behaviors/** dir, which forbids it). See
-// packages/core/src/policy-tanh-reference.test.ts for the out-of-scan
-// sanity check against Math.tanh.
+// Property tests only -- no reference to the platform's built-in
+// (ECMA-approximate) trig tanh here: this file lives under the
+// determinism-scanned content/behaviors/** dir, which forbids that token
+// even in comments (see determinism-scan.test.ts's FORBIDDEN_MATH regex).
+// See packages/core/src/policy-tanh-reference.test.ts for the out-of-scan
+// sanity check against that platform function.
 import { describe, expect, it } from 'vitest';
 import { CLAMP_THRESHOLD, detTanh } from './tanh.js';
 

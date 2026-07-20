@@ -69,7 +69,13 @@ export default tseslint.config(
   tseslint.configs.recommended,
   eslintConfigPrettier,
   {
-    files: ['packages/core/src/sim/**/*.ts'],
+    // content/behaviors/** was added for #66: it hosts exported inference
+    // Behaviors (content/behaviors/policy/), whose deterministic-tanh
+    // requirement ("no platform-approximate trig/exp") this override's
+    // no-restricted-properties list already enforces, same as sim/'s no-
+    // Math.random rule. Keep in sync with determinism-scan.test.ts's
+    // SCANNED_DIRS (the exhaustive fs-based belt behind this glob).
+    files: ['packages/core/src/sim/**/*.ts', 'packages/core/src/content/behaviors/**/*.ts'],
     rules: {
       'no-restricted-globals': [
         'error',

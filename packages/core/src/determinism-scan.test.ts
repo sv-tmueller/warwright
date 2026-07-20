@@ -5,10 +5,23 @@ import { describe, expect, it } from 'vitest';
 // Exhaustive belt behind the sim/ ESLint override in eslint.config.js. This
 // test lives outside sim/ (deviation logged in the P0-02 sub-plan) because it
 // needs fs, which the override forbids inside sim/. It reads every file
-// under sim/ (including tests) as plain text and fails on any forbidden
-// token, catching what lint misses: globalThis-style escapes and stray
-// tokens in comments. Keep these regexes in sync with the override's lists.
-const SIM_DIR = fileURLToPath(new URL('./sim/', import.meta.url));
+// under each SCANNED_DIR (including tests) as plain text and fails on any
+// forbidden token, catching what lint misses: globalThis-style escapes and
+// stray tokens in comments. Keep these regexes in sync with the override's
+// lists.
+//
+// content/behaviors/** was added for #66 (per the #66 SUB_PLAN's "guard
+// extension"): it hosts exported inference Behaviors (content/behaviors/
+// policy/), whose deterministic-tanh requirement ("NOT Math.tanh") the
+// FORBIDDEN_MATH regex already mechanically enforces, same as sim/'s no-
+// Math.random rule.
+const SCANNED_DIRS = [
+  { name: 'sim', path: fileURLToPath(new URL('./sim/', import.meta.url)) },
+  {
+    name: 'content/behaviors',
+    path: fileURLToPath(new URL('./content/behaviors/', import.meta.url)),
+  },
+];
 
 const FORBIDDEN_MATH =
   /\bMath\.(random|sqrt|cbrt|pow|exp|expm1|log|log1p|log2|log10|sin|cos|tan|asin|acos|atan|atan2|sinh|cosh|tanh|asinh|acosh|atanh|hypot|fround)\b/;
@@ -31,16 +44,16 @@ function findViolations(contents: string): string[] {
 }
 
 describe('determinism scan', () => {
-  it('finds no forbidden tokens anywhere under sim/', () => {
-    const files = readdirSync(SIM_DIR, { recursive: true, encoding: 'utf8' }).filter((entry) =>
+  it.each(SCANNED_DIRS)('finds no forbidden tokens anywhere under $name/', ({ name, path }) => {
+    const files = readdirSync(path, { recursive: true, encoding: 'utf8' }).filter((entry) =>
       entry.endsWith('.ts'),
     );
 
     expect(files.length).toBeGreaterThan(0);
 
     const offenders = files.flatMap((file) => {
-      const contents = readFileSync(`${SIM_DIR}${file}`, 'utf8');
-      return findViolations(contents).map((reason) => `${file}: ${reason}`);
+      const contents = readFileSync(`${path}${file}`, 'utf8');
+      return findViolations(contents).map((reason) => `${name}/${file}: ${reason}`);
     });
 
     expect(offenders).toEqual([]);

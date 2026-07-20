@@ -5,7 +5,8 @@
 //
 //   1. featurize the raw int observation (featurize.ts)
 //   2. trunk1: Linear, weight layout [out][in] (torch convention), y = W*x+b
-//   3. tanh elementwise (tanh.ts's detTanh, never Math.tanh)
+//   3. tanh elementwise (tanh.ts's detTanh, never the platform's built-in
+//      trig tanh, which is forbidden -- see tanh.ts)
 //   4. trunk2: Linear, same layout
 //   5. tanh elementwise
 //   6. actorHead: Linear, same layout -> one flat logits vector

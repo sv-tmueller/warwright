@@ -22,7 +22,12 @@ describe('@warwright/core', () => {
   });
 
   it('exposes the seed behavior id enumeration', () => {
-    expect(behaviorIds).toEqual(['aggro-lowest-hp', 'protect-allies', 'focus-casters']);
+    expect(behaviorIds).toEqual([
+      'aggro-lowest-hp',
+      'protect-allies',
+      'focus-casters',
+      'policy-smoke-v1',
+    ]);
   });
 
   it('excludes the external sentinel from the public behaviorIds enumeration', () => {
