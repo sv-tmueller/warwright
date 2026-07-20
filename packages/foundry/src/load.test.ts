@@ -50,7 +50,6 @@ describe('loadSubmission', () => {
         author: 'foundry-fixtures',
         entry: 'behavior.ts',
         build: { roleId: 'reaver', skillIds: ['cleave'], position: { x: 0, y: 0 } },
-        baseline: 'aggro-lowest-hp',
         shape: 'general',
       }),
       'behavior.ts': `
@@ -73,7 +72,6 @@ describe('loadSubmission', () => {
         author: 'foundry-fixtures',
         entry: 'behavior.ts',
         build: { roleId: 'reaver', skillIds: ['cleave'], position: { x: 0, y: 0 } },
-        baseline: 'aggro-lowest-hp',
         shape: 'general',
       }),
       'behavior.ts': `export const notABehavior = 'just a string';`,
@@ -96,7 +94,6 @@ describe('loadSubmission', () => {
         author: 'foundry-fixtures',
         entry: 'behavior.js',
         build: { roleId: 'reaver', skillIds: ['cleave'], position: { x: 0, y: 0 } },
-        baseline: 'aggro-lowest-hp',
         shape: 'general',
       }),
       'behavior.js': `module.exports = { id: 'js-entry', decide: () => ({ kind: 'idle' }) };`,

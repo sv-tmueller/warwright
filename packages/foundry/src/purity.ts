@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { Behavior, Replay } from '@warwright/core';
 import { RULESET_VERSION, runMatchWithBehaviors } from '@warwright/core';
 import { findForbiddenTokenViolations } from '@warwright/core/purity-tokens';
+import { GATE_GENERAL_BASELINE_BEHAVIOR_ID } from './baseline.js';
 import type { SubmissionManifest } from './manifest.js';
 
 // A submission .ts file may import ONLY '@warwright/core' (the public API;
@@ -143,6 +144,11 @@ export function scanSubmissionDirStatic(dir: string): void {
   }
 }
 
+// Stage 2's single-baseline-unit representative-match opponent, GATE-pinned
+// exactly like stage 3's 'general' roster (see baseline.ts's own doc
+// comment on GATE_GENERAL_BASELINE_BEHAVIOR_ID, and Fix 1, review of PR
+// #137): the submission's manifest has no `baseline` field, so this never
+// asks a submission which Behavior its own idempotence check runs against.
 function representativeReplay(manifest: SubmissionManifest): Replay {
   return {
     version: RULESET_VERSION,
@@ -164,7 +170,7 @@ function representativeReplay(manifest: SubmissionManifest): Replay {
         {
           roleId: 'mender',
           skillIds: [],
-          behaviorId: manifest.baseline,
+          behaviorId: GATE_GENERAL_BASELINE_BEHAVIOR_ID,
           position: { x: 500, y: 500 },
         },
       ],

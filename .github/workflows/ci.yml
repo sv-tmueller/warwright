@@ -32,6 +32,16 @@ jobs:
       - run: pnpm -r test
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/warwright_test
+
+      # Mechanical proof of the Phase 3 DoD's "Foundry CI accepts a valid
+      # sample Behavior": run the real gate CLI against the committed valid
+      # submissions and require exit 0 (stages 1-3, including the seed
+      # gauntlet). Rejections (a deliberately invalid submission) are
+      # already proven by the foundry vitest suite above (packages/foundry/
+      # src/validate.test.ts + cli-e2e.test.ts), which pnpm -r test just ran.
+      - run: pnpm foundry:validate packages/foundry/submissions/sample-aggro
+      - run: pnpm foundry:validate packages/foundry/submissions/sample-policy
+
       - run: pnpm build
 
       # The gym-bridge's dist/main.js (built above) is what the Python

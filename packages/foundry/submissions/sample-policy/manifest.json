@@ -1,6 +1,7 @@
 {
-  "id": "bad-manifest",
-  "author": "",
+  "id": "sample-policy",
+  "author": "foundry-fixtures",
+  "entry": "behavior.ts",
   "build": {
     "roleId": "reaver",
     "skillIds": ["cleave"],
@@ -9,5 +10,5 @@
       "y": 0
     }
   },
-  "shape": "general"
+  "shape": "1v1"
 }

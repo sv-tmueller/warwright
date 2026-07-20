@@ -1,6 +1,7 @@
 {
-  "id": "bad-manifest",
-  "author": "",
+  "id": "weak-idle",
+  "author": "foundry-fixtures",
+  "entry": "behavior.ts",
   "build": {
     "roleId": "reaver",
     "skillIds": ["cleave"],
