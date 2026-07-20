@@ -95,6 +95,19 @@ MIN_FIXTURE_CASES = 16
 # below this).
 TARGET_FIXTURE_CASES = 64
 
+# ticks_per_step for FIXTURE observation collection specifically -- NOT
+# evaluate()'s win-rate protocol tick rate (20, unchanged there). This
+# smoke build's 1v1 fight against a deterministic-argmax policy turns out
+# to have exactly one possible trajectory (nothing in this specific
+# matchup consumes RNG in a way that changes it -- confirmed empirically:
+# sweeping far beyond the pinned 4-batch/64-match protocol's seed range
+# still deduped down to the SAME 7 unique observations at
+# ticks_per_step=20). Sampling that one trajectory at a 1-tick grain
+# instead still stays strictly in-distribution (the same real fight, the
+# committed policy actually plays), and yields well over
+# TARGET_FIXTURE_CASES unique observations -- see gym/EXPORT.md.
+FIXTURE_TICKS_PER_STEP = 1
+
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_WEIGHTS_OUT = (
     _REPO_ROOT / "packages/core/src/content/behaviors/policy/policy-smoke-v1.weights.json"
@@ -300,30 +313,40 @@ def hand_built_edge_case_observations(
     return variants
 
 
+# A generous per-match tick budget (mirrors evaluate.py's own MAX_EVAL_STEPS
+# rationale: the core's MATCH_TICK_CAP is 6000 ticks; this leaves headroom
+# above that regardless of `ticks_per_step`, without risking masking a real
+# "stuck" bug as a clean timeout).
+_FIXTURE_TICK_BUDGET = 8_000
+
+
 def collect_pinned_rollout_observations(
     policy: ActorCriticPolicy,
     *,
     build_a: dict[str, Any],
     build_b: dict[str, Any],
-    ticks_per_step: int = 20,
+    ticks_per_step: int = FIXTURE_TICKS_PER_STEP,
     node: str = "node",
     bridge_path: Path | None = None,
 ) -> list[np.ndarray]:
     """Every raw int64 observation the deterministic-argmax `policy` acted
-    on over the FULL pinned eval protocol
+    on over the pinned eval protocol's seeds
     (`warwright_gym.training.evaluate`'s `EVAL_SEED_BASE`/`EVAL_BATCH_SIZE`/
     `EVAL_NUM_BATCHES`) against `build_a`/`build_b` -- in-distribution
     states for the committed policy, per the #131 SUB_PLAN. Mirrors
-    `evaluate()`'s loop exactly, but records observations instead of
-    winners."""
+    `evaluate()`'s loop, but records observations instead of winners, and
+    (see `FIXTURE_TICKS_PER_STEP`) defaults to a finer tick grain than
+    `evaluate()`'s own win-rate protocol for fixture-observation
+    diversity."""
     from warwright_gym.env import WarwrightVectorEnv
     from warwright_gym.training.evaluate import (
         EVAL_BATCH_SIZE,
         EVAL_NUM_BATCHES,
         EVAL_SEED_BASE,
-        MAX_EVAL_STEPS,
         TorchPolicyAdapter,
     )
+
+    max_steps = math.ceil(_FIXTURE_TICK_BUDGET / ticks_per_step)
 
     adapter = TorchPolicyAdapter(policy)
     env = WarwrightVectorEnv(
@@ -340,7 +363,7 @@ def collect_pinned_rollout_observations(
             obs, _info = env.reset(seed=EVAL_SEED_BASE + batch_index)
             done = np.zeros(env.num_envs, dtype=bool)
 
-            for _step in range(MAX_EVAL_STEPS):
+            for _step in range(max_steps):
                 if done.all():
                     break
                 for env_id in range(env.num_envs):
@@ -358,7 +381,7 @@ def collect_pinned_rollout_observations(
             if not done.all():
                 raise RuntimeError(
                     f"collect_pinned_rollout_observations: batch {batch_index} did not reach "
-                    f"done for every sub-env within MAX_EVAL_STEPS={MAX_EVAL_STEPS}"
+                    f"done for every sub-env within max_steps={max_steps}"
                 )
     finally:
         env.close()
