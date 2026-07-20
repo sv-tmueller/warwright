@@ -125,13 +125,21 @@ export interface ManualScheduler extends Scheduler {
  * `fire()`.
  */
 export function createManualScheduler(): ManualScheduler {
-  const now = 0;
+  let clock = 0;
   let nextId = 1;
   let current: PendingTimer | undefined;
   let scheduleCount = 0;
 
   return {
-    now: () => now,
+    // A monotonically-increasing logical tick, not wall time: every call
+    // advances it, so each enqueue() gets a genuinely distinct enqueuedAt —
+    // load-bearing for proving the pairing pass really sorts by timestamp
+    // (see collectPairings's doc comment on failPairing restores preserving
+    // original order) rather than incidentally matching Map insertion order.
+    now: () => {
+      clock += 1;
+      return clock;
+    },
     schedule(callback, ms) {
       const id = nextId;
       nextId += 1;

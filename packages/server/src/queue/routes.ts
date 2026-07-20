@@ -10,23 +10,6 @@ import { MatchResultResponseSchema } from '../matches/schemas.js';
 import { applyMatchRatings } from '../ratings/service.js';
 import { createQueueService, type Pairing, type QueueService, type Scheduler } from './service.js';
 
-declare module 'fastify' {
-  interface FastifyInstance {
-    /**
-     * Test-only escape hatch: resolves once the most recently started
-     * pairing pass (timer-triggered or K-triggered) has fully settled
-     * (including the injected resolver's resolveMatch/applyMatchRatings
-     * work), or immediately if none is in flight. HTTP-level tests
-     * (queue.test.ts) have no other way to await a K-triggered pass
-     * deterministically, since that path never touches the scheduler at
-     * all. Not used by any production route. Optional: only present on
-     * instances that registered queueRoutes (i.e. db+pool+session all
-     * supplied to buildApp — see app.ts).
-     */
-    queueSettled?: () => Promise<void>;
-  }
-}
-
 export interface QueueRoutesOptions {
   db: Database;
   queue?: QueueConfig;
@@ -37,6 +20,18 @@ export interface QueueConfig {
   windowMs?: number;
   maxPool?: number;
   scheduler?: Scheduler;
+  /**
+   * Test-only escape hatch: called once, synchronously, with the
+   * QueueService instance this plugin registration creates. HTTP-level
+   * tests (queue.test.ts) have no other way to await a pairing pass to
+   * quiescence deterministically — Fastify's plugin encapsulation means a
+   * decorator added inside this plugin isn't visible on the parent app
+   * instance (see plugins/session.ts's fp() doc comment for the one case
+   * that deliberately opts out of that), and a K-triggered pass never
+   * touches the scheduler at all, so there's no other seam to hook. Never
+   * read by any production route.
+   */
+  onQueueServiceCreated?: (queueService: QueueService) => void;
 }
 
 const GENERIC_NOT_AUTHENTICATED = { error: 'Not authenticated' } as const;
@@ -174,8 +169,7 @@ const queueRoutes: FastifyPluginAsyncZod<QueueRoutesOptions> = async (app, optio
     scheduler: queue?.scheduler,
   });
   queueServiceBox.current = queueService;
-
-  app.decorate('queueSettled', () => queueService.settled());
+  queue?.onQueueServiceCreated?.(queueService);
 
   await app.register(fastifyRateLimit, { global: false });
 

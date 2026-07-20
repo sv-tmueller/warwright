@@ -1,12 +1,14 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { runMatch } from '@warwright/core';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
+import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from '../app.js';
 import { createDb, type Database } from '../db/client.js';
 import { runMigrations } from '../db/migrate.js';
 import { DEFAULT_RATING, DEFAULT_RATING_DEVIATION, matches, ratings } from '../db/schema.js';
+import { createManualScheduler, type ManualScheduler, type QueueService } from './service.js';
 
 const url = process.env.DATABASE_URL;
 
@@ -49,16 +51,58 @@ describe.skipIf(!url)('queue routes', () => {
     await pool.end();
   });
 
-  function buildTestApp() {
-    return buildApp({
+  /**
+   * Builds a test app with a manual scheduler this test fully controls
+   * (see queue/service.ts's createManualScheduler doc comment — real
+   * elapsed time never matters here, only explicit `fire()` calls do).
+   * `maxPool` defaults to the production default (8) so ordinary
+   * two/three-player tests exercise the timer path, not the K-trigger;
+   * tests of the K-trigger itself override it. Also captures the
+   * QueueService instance the plugin creates (via the test-only
+   * `onQueueServiceCreated` hook — see QueueConfig's doc comment) so
+   * `settleQueue` can await a pass to quiescence, including a K-triggered
+   * one that never touches the scheduler at all.
+   */
+  function buildTestApp(maxPool?: number): {
+    app: FastifyInstance;
+    scheduler: ManualScheduler;
+    getQueueService: () => QueueService;
+  } {
+    const scheduler = createManualScheduler();
+    const queueServiceBox: { current?: QueueService } = {};
+    const app = buildApp({
       db,
       pool,
       session: { secret: SESSION_SECRET, cookieSecure: false, pruneSessionInterval: false },
+      queue: {
+        scheduler,
+        maxPool,
+        onQueueServiceCreated: (service) => {
+          queueServiceBox.current = service;
+        },
+      },
     });
+    return { app, scheduler, getQueueService: () => queueServiceBox.current! };
+  }
+
+  /**
+   * Runs any pending pairing pass to completion and awaits it to
+   * quiescence: fires the batching-window timer if one is armed (the
+   * common case), then always awaits `queueService.settled()` — which
+   * also covers a K-triggered pass. Shared by every test below that needs
+   * to observe a pairing's result: enqueue -> settleQueue -> GET,
+   * replacing #57's inline-200 assertions (see this file's git history for
+   * the pre-#108 shape).
+   */
+  async function settleQueue(scheduler: ManualScheduler, getQueueService: () => QueueService): Promise<void> {
+    if (scheduler.pending) {
+      scheduler.fire();
+    }
+    await getQueueService().settled();
   }
 
   /** Registers a fresh account over HTTP and returns its id plus an authenticated session + CSRF token. */
-  async function registerUser(app: ReturnType<typeof buildTestApp>) {
+  async function registerUser(app: FastifyInstance) {
     const preCsrf = await app.inject({ method: 'GET', url: '/auth/csrf' });
     const preCookie = extractCookie(preCsrf.headers['set-cookie']);
     const { csrfToken: preToken } = preCsrf.json() as { csrfToken: string };
@@ -80,7 +124,7 @@ describe.skipIf(!url)('queue routes', () => {
 
   /** Saves a warband for an authenticated user and returns its id. */
   async function saveWarband(
-    app: ReturnType<typeof buildTestApp>,
+    app: FastifyInstance,
     user: { cookie: string; csrfToken: string },
     build: Record<string, unknown>
   ): Promise<string> {
@@ -98,37 +142,44 @@ describe.skipIf(!url)('queue routes', () => {
     await db.insert(ratings).values({ userId, rating });
   }
 
-  it('pairs two players: the first getting waiting (202), the second matched (200), and persists exactly one matches row reproducible by re-run', async () => {
-    const app = buildTestApp();
+  /** POSTs /queue and asserts the universal 202 waiting contract (never 200 since #108 — see this file's top-level doc comment). */
+  async function postEnqueue(
+    app: FastifyInstance,
+    user: { cookie: string; csrfToken: string },
+    warbandId: string
+  ) {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/queue',
+      headers: { cookie: user.cookie, 'csrf-token': user.csrfToken },
+      payload: { warbandId },
+    });
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toEqual({ status: 'waiting' });
+    return response;
+  }
+
+  async function getStatus(app: FastifyInstance, user: { cookie: string }) {
+    const response = await app.inject({ method: 'GET', url: '/queue', headers: { cookie: user.cookie } });
+    return response.json() as { status: string; matchId?: string; result?: { winner: string } };
+  }
+
+  it('pairs two players via a batching-window pass: both POSTs are 202, and GET delivers the matched result, persisting exactly one matches row reproducible by re-run', async () => {
+    const { app, scheduler, getQueueService } = buildTestApp();
     const userA = await registerUser(app);
     const userB = await registerUser(app);
     const warbandAId = await saveWarband(app, userA, warbandA);
     const warbandBId = await saveWarband(app, userB, warbandB);
 
-    const first = await app.inject({
-      method: 'POST',
-      url: '/queue',
-      headers: { cookie: userA.cookie, 'csrf-token': userA.csrfToken },
-      payload: { warbandId: warbandAId },
-    });
-    expect(first.statusCode).toBe(202);
-    expect(first.json()).toEqual({ status: 'waiting' });
+    await postEnqueue(app, userA, warbandAId);
+    await postEnqueue(app, userB, warbandBId);
 
-    const second = await app.inject({
-      method: 'POST',
-      url: '/queue',
-      headers: { cookie: userB.cookie, 'csrf-token': userB.csrfToken },
-      payload: { warbandId: warbandBId },
-    });
-    expect(second.statusCode).toBe(200);
-    const matched = second.json() as {
-      status: string;
-      matchId: string;
-      result: { version: number; seed: number; hash: number; winner: string; eventLog: unknown[] };
-    };
-    expect(matched.status).toBe('matched');
-    expect(['A', 'B', 'draw']).toContain(matched.result.winner);
-    expect(matched.result.eventLog.length).toBeGreaterThan(0);
+    await settleQueue(scheduler, getQueueService);
+
+    const statusA = await getStatus(app, userA);
+    expect(statusA.status).toBe('matched');
+    const matchId = statusA.matchId!;
+    expect(['A', 'B', 'draw']).toContain(statusA.result!.winner);
 
     const rows = await db
       .select()
@@ -136,7 +187,7 @@ describe.skipIf(!url)('queue routes', () => {
       .where(and(eq(matches.userAId, userA.id), eq(matches.userBId, userB.id)));
     expect(rows.length).toBe(1);
     const row = rows[0]!;
-    expect(row.id).toBe(matched.matchId);
+    expect(row.id).toBe(matchId);
 
     const rerun = runMatch({
       version: row.rulesetVersion,
@@ -151,30 +202,21 @@ describe.skipIf(!url)('queue routes', () => {
   });
 
   it('delivers the same matched result to both clients via GET, and clears it once the winner re-enqueues', async () => {
-    const app = buildTestApp();
+    const { app, scheduler, getQueueService } = buildTestApp();
     const userA = await registerUser(app);
     const userB = await registerUser(app);
     const warbandAId = await saveWarband(app, userA, warbandA);
     const warbandBId = await saveWarband(app, userB, warbandB);
 
-    await app.inject({
-      method: 'POST',
-      url: '/queue',
-      headers: { cookie: userA.cookie, 'csrf-token': userA.csrfToken },
-      payload: { warbandId: warbandAId },
-    });
-    const joinResponse = await app.inject({
-      method: 'POST',
-      url: '/queue',
-      headers: { cookie: userB.cookie, 'csrf-token': userB.csrfToken },
-      payload: { warbandId: warbandBId },
-    });
-    const { matchId } = joinResponse.json() as { matchId: string };
+    await postEnqueue(app, userA, warbandAId);
+    await postEnqueue(app, userB, warbandBId);
+    await settleQueue(scheduler, getQueueService);
 
     const getA = await app.inject({ method: 'GET', url: '/queue', headers: { cookie: userA.cookie } });
     expect(getA.statusCode).toBe(200);
-    expect((getA.json() as { status: string; matchId: string }).status).toBe('matched');
-    expect((getA.json() as { status: string; matchId: string }).matchId).toBe(matchId);
+    const bodyA = getA.json() as { status: string; matchId: string };
+    expect(bodyA.status).toBe('matched');
+    const matchId = bodyA.matchId;
 
     const getB = await app.inject({ method: 'GET', url: '/queue', headers: { cookie: userB.cookie } });
     expect((getB.json() as { status: string; matchId: string }).matchId).toBe(matchId);
@@ -196,17 +238,11 @@ describe.skipIf(!url)('queue routes', () => {
   });
 
   it('a lone waiter can leave the queue: waiting -> DELETE 204 -> idle', async () => {
-    const app = buildTestApp();
+    const { app } = buildTestApp();
     const user = await registerUser(app);
     const warbandId = await saveWarband(app, user, warbandA);
 
-    const enqueue = await app.inject({
-      method: 'POST',
-      url: '/queue',
-      headers: { cookie: user.cookie, 'csrf-token': user.csrfToken },
-      payload: { warbandId },
-    });
-    expect(enqueue.statusCode).toBe(202);
+    await postEnqueue(app, user, warbandId);
 
     const status = await app.inject({ method: 'GET', url: '/queue', headers: { cookie: user.cookie } });
     expect(status.json()).toEqual({ status: 'waiting' });
@@ -232,17 +268,11 @@ describe.skipIf(!url)('queue routes', () => {
   });
 
   it('never self-pairs: a second POST from the same waiting user is 409', async () => {
-    const app = buildTestApp();
+    const { app } = buildTestApp();
     const user = await registerUser(app);
     const warbandId = await saveWarband(app, user, warbandA);
 
-    const first = await app.inject({
-      method: 'POST',
-      url: '/queue',
-      headers: { cookie: user.cookie, 'csrf-token': user.csrfToken },
-      payload: { warbandId },
-    });
-    expect(first.statusCode).toBe(202);
+    await postEnqueue(app, user, warbandId);
 
     const second = await app.inject({
       method: 'POST',
@@ -256,25 +286,19 @@ describe.skipIf(!url)('queue routes', () => {
     await app.close();
   });
 
-  // With the always-pair-the-sole-available-candidate semantics (see
-  // service.ts's no-await invariant: enqueue() is atomic and pairs
-  // immediately whenever any candidate is waiting), the `waiting` pool can
-  // never hold two entries at once — the moment a second distinct user
-  // enqueues, they always find the one existing waiter and pair with them.
-  // So a true "nearest of several simultaneously-waiting candidates" choice
-  // is only observable at the unit level (service.test.ts, which drives
-  // selectOpponent directly against a synthetic multi-candidate pool,
-  // including the P=1200/Q=1600/joiner=1500 example from the #57 sub-plan).
-  // This integration test instead proves the DB-backed half of decision 3:
-  // a user with no `ratings` row reads as DEFAULT_RATING (1500) without
-  // crashing, and still pairs successfully. Since #110, a resolved match
-  // also rates both players (applyMatchRatings, hooked in after
-  // resolveMatch — see queue/routes.ts): the row R had none of before the
-  // match is created as part of that rating write, not by the matchmaking
-  // read itself, and R's post-match rating starts from DEFAULT_RATING as
-  // its pre-match value, per the lazy-default contract.
+  // Since #108, the waiting pool routinely holds more than one entry at
+  // once (the whole point of the batching-window accumulation policy) —
+  // the #57-era comment here claimed the opposite ("can never hold two
+  // entries"), which was already false even under #57 via the failPairing
+  // restore path (A restored while C waits => 2 entries; see PR #107's
+  // comment thread). The dedicated nearest-rating E2E test below now
+  // exercises the real multi-candidate scenario this comment used to say
+  // was unreachable. This test keeps proving the narrower, still-relevant
+  // fact: a user with no `ratings` row reads as DEFAULT_RATING (1500)
+  // without crashing, and still pairs and gets rated from that lazy
+  // default (applyMatchRatings, hooked in after resolveMatch).
   it('pairs a user with no ratings row using the lazy 1500 default, then rates both from it', async () => {
-    const app = buildTestApp();
+    const { app, scheduler, getQueueService } = buildTestApp();
     const userP = await registerUser(app);
     const userR = await registerUser(app); // no ratings row at all
     await setRating(userP.id, 1200);
@@ -282,22 +306,13 @@ describe.skipIf(!url)('queue routes', () => {
     const warbandPId = await saveWarband(app, userP, warbandA);
     const warbandRId = await saveWarband(app, userR, warbandB);
 
-    const waitResponse = await app.inject({
-      method: 'POST',
-      url: '/queue',
-      headers: { cookie: userP.cookie, 'csrf-token': userP.csrfToken },
-      payload: { warbandId: warbandPId },
-    });
-    expect(waitResponse.statusCode).toBe(202);
+    await postEnqueue(app, userP, warbandPId);
+    await postEnqueue(app, userR, warbandRId);
+    await settleQueue(scheduler, getQueueService);
 
-    const joinResponse = await app.inject({
-      method: 'POST',
-      url: '/queue',
-      headers: { cookie: userR.cookie, 'csrf-token': userR.csrfToken },
-      payload: { warbandId: warbandRId },
-    });
-    expect(joinResponse.statusCode).toBe(200);
-    const { matchId } = joinResponse.json() as { matchId: string };
+    const status = await getStatus(app, userP);
+    expect(status.status).toBe('matched');
+    const matchId = status.matchId!;
 
     const [row] = await db.select().from(matches).where(eq(matches.id, matchId));
     expect(row).toBeDefined();
@@ -313,7 +328,7 @@ describe.skipIf(!url)('queue routes', () => {
   });
 
   it('rejects unauthenticated requests to all three endpoints with 401', async () => {
-    const app = buildTestApp();
+    const { app } = buildTestApp();
 
     const post = await app.inject({ method: 'POST', url: '/queue', payload: { warbandId: crypto.randomUUID() } });
     expect(post.statusCode).toBe(401);
@@ -328,7 +343,7 @@ describe.skipIf(!url)('queue routes', () => {
   });
 
   it('rejects mutating requests with a valid session but no CSRF token: 403', async () => {
-    const app = buildTestApp();
+    const { app } = buildTestApp();
     const user = await registerUser(app);
 
     const post = await app.inject({
@@ -346,27 +361,27 @@ describe.skipIf(!url)('queue routes', () => {
   });
 
   it('accepts only intent (warbandId): a client-supplied seed/winner is ignored, proven by a server-computed re-run', async () => {
-    const app = buildTestApp();
+    const { app, scheduler, getQueueService } = buildTestApp();
     const userA = await registerUser(app);
     const userB = await registerUser(app);
     const warbandAId = await saveWarband(app, userA, warbandA);
     const warbandBId = await saveWarband(app, userB, warbandB);
 
-    await app.inject({
-      method: 'POST',
-      url: '/queue',
-      headers: { cookie: userA.cookie, 'csrf-token': userA.csrfToken },
-      payload: { warbandId: warbandAId },
-    });
+    await postEnqueue(app, userA, warbandAId);
+    // Extra client-supplied fields must be stripped/ignored, not forwarded to resolveMatch.
     const joinResponse = await app.inject({
       method: 'POST',
       url: '/queue',
       headers: { cookie: userB.cookie, 'csrf-token': userB.csrfToken },
-      // Extra client-supplied fields must be stripped/ignored, not forwarded to resolveMatch.
       payload: { warbandId: warbandBId, seed: 999999, winner: 'B' },
     });
-    expect(joinResponse.statusCode).toBe(200);
-    const { matchId, result } = joinResponse.json() as { matchId: string; result: { seed: number } };
+    expect(joinResponse.statusCode).toBe(202);
+    await settleQueue(scheduler, getQueueService);
+
+    const status = await getStatus(app, userB);
+    expect(status.status).toBe('matched');
+    const matchId = status.matchId!;
+    const result = status.result as unknown as { seed: number };
     expect(result.seed).not.toBe(999999);
 
     const [row] = await db.select().from(matches).where(eq(matches.id, matchId));
@@ -377,25 +392,18 @@ describe.skipIf(!url)('queue routes', () => {
   });
 
   it('resolved match snapshots are immutable to a later PUT edit of the source warband', async () => {
-    const app = buildTestApp();
+    const { app, scheduler, getQueueService } = buildTestApp();
     const userA = await registerUser(app);
     const userB = await registerUser(app);
     const warbandAId = await saveWarband(app, userA, warbandA);
     const warbandBId = await saveWarband(app, userB, warbandB);
 
-    await app.inject({
-      method: 'POST',
-      url: '/queue',
-      headers: { cookie: userA.cookie, 'csrf-token': userA.csrfToken },
-      payload: { warbandId: warbandAId },
-    });
-    const joinResponse = await app.inject({
-      method: 'POST',
-      url: '/queue',
-      headers: { cookie: userB.cookie, 'csrf-token': userB.csrfToken },
-      payload: { warbandId: warbandBId },
-    });
-    const { matchId } = joinResponse.json() as { matchId: string };
+    await postEnqueue(app, userA, warbandAId);
+    await postEnqueue(app, userB, warbandBId);
+    await settleQueue(scheduler, getQueueService);
+
+    const status = await getStatus(app, userA);
+    const matchId = status.matchId!;
 
     const editedBuild = { ...warbandA, name: 'Edited After Queueing' };
     const putResponse = await app.inject({
@@ -414,8 +422,8 @@ describe.skipIf(!url)('queue routes', () => {
     await app.close();
   });
 
-  it('handles concurrent joiners: exactly one pairs, the other stays waiting, and exactly one match row is created', async () => {
-    const app = buildTestApp();
+  it('handles concurrent joiners: both concurrent POSTs are 202, exactly one pairing results, the leftover stays waiting, and exactly one match row is created', async () => {
+    const { app, scheduler, getQueueService } = buildTestApp();
     const userA = await registerUser(app);
     const userB = await registerUser(app);
     const userC = await registerUser(app);
@@ -423,12 +431,7 @@ describe.skipIf(!url)('queue routes', () => {
     const warbandBId = await saveWarband(app, userB, warbandB);
     const warbandCId = await saveWarband(app, userC, warbandA);
 
-    await app.inject({
-      method: 'POST',
-      url: '/queue',
-      headers: { cookie: userA.cookie, 'csrf-token': userA.csrfToken },
-      payload: { warbandId: warbandAId },
-    });
+    await postEnqueue(app, userA, warbandAId);
 
     const [responseB, responseC] = await Promise.all([
       app.inject({
@@ -445,8 +448,17 @@ describe.skipIf(!url)('queue routes', () => {
       }),
     ]);
 
-    const statuses = [responseB.statusCode, responseC.statusCode].sort();
-    expect(statuses).toEqual([200, 202]);
+    // Every enqueue is 202 now, concurrent or not: no double-response, no
+    // self-pairing artifact from the race (see service.test.ts for the
+    // pure-unit no-double/self-pair proof over a larger pool).
+    expect(responseB.statusCode).toBe(202);
+    expect(responseC.statusCode).toBe(202);
+
+    await settleQueue(scheduler, getQueueService);
+
+    const [statusB, statusC] = await Promise.all([getStatus(app, userB), getStatus(app, userC)]);
+    const outcomes = [statusB.status, statusC.status].sort();
+    expect(outcomes).toEqual(['matched', 'waiting']);
 
     const rows = await db.select().from(matches).where(eq(matches.userAId, userA.id));
     expect(rows.length).toBe(1);
@@ -454,8 +466,8 @@ describe.skipIf(!url)('queue routes', () => {
     await app.close();
   });
 
-  it('scopes /queue to the caller\'s own warbands: a foreign or nonexistent warbandId 404s', async () => {
-    const app = buildTestApp();
+  it("scopes /queue to the caller's own warbands: a foreign or nonexistent warbandId 404s", async () => {
+    const { app } = buildTestApp();
     const userA = await registerUser(app);
     const userB = await registerUser(app);
     const warbandAId = await saveWarband(app, userA, warbandA);
@@ -480,25 +492,19 @@ describe.skipIf(!url)('queue routes', () => {
   });
 
   it('rates both players once a queue match resolves: winner up, loser (or both, on a draw) RD shrinks, matches.rated_at is set', async () => {
-    const app = buildTestApp();
+    const { app, scheduler, getQueueService } = buildTestApp();
     const userA = await registerUser(app);
     const userB = await registerUser(app);
     const warbandAId = await saveWarband(app, userA, warbandA);
     const warbandBId = await saveWarband(app, userB, warbandB);
 
-    await app.inject({
-      method: 'POST',
-      url: '/queue',
-      headers: { cookie: userA.cookie, 'csrf-token': userA.csrfToken },
-      payload: { warbandId: warbandAId },
-    });
-    const joinResponse = await app.inject({
-      method: 'POST',
-      url: '/queue',
-      headers: { cookie: userB.cookie, 'csrf-token': userB.csrfToken },
-      payload: { warbandId: warbandBId },
-    });
-    const { matchId, result } = joinResponse.json() as { matchId: string; result: { winner: 'A' | 'B' | 'draw' } };
+    await postEnqueue(app, userA, warbandAId);
+    await postEnqueue(app, userB, warbandBId);
+    await settleQueue(scheduler, getQueueService);
+
+    const status = await getStatus(app, userA);
+    const matchId = status.matchId!;
+    const result = status.result as unknown as { winner: 'A' | 'B' | 'draw' };
 
     const rows = await db.select().from(ratings).where(inArray(ratings.userId, [userA.id, userB.id]));
     expect(rows.length).toBe(2);
@@ -525,7 +531,7 @@ describe.skipIf(!url)('queue routes', () => {
   });
 
   it('returns 429 after exceeding the per-route POST /queue rate limit (30/min)', async () => {
-    const app = buildTestApp();
+    const { app } = buildTestApp();
     const user = await registerUser(app);
 
     const attempt = () =>
@@ -547,6 +553,165 @@ describe.skipIf(!url)('queue routes', () => {
 
     expect(statuses.slice(0, 30)).toEqual(new Array<number>(30).fill(404));
     expect(statuses[30]).toBe(429);
+
+    await app.close();
+  });
+
+  // --- New #108 E2E tests: the acceptance-criteria centerpiece ---------
+
+  it('nearest-rating pairing over a real 3-client pool: P (1200) pairs with lazy-default R (1500) over Q (1600), leaving Q waiting', async () => {
+    const { app, scheduler, getQueueService } = buildTestApp();
+    const userP = await registerUser(app);
+    const userQ = await registerUser(app);
+    const userR = await registerUser(app); // no ratings row: lazy DEFAULT_RATING (1500)
+    await setRating(userP.id, 1200);
+    await setRating(userQ.id, 1600);
+
+    const warbandPId = await saveWarband(app, userP, warbandA);
+    const warbandQId = await saveWarband(app, userQ, warbandB);
+    const warbandRId = await saveWarband(app, userR, warbandA);
+
+    await postEnqueue(app, userP, warbandPId);
+    await postEnqueue(app, userQ, warbandQId);
+    await postEnqueue(app, userR, warbandRId);
+
+    // All three simultaneously waiting at once — structurally unreachable
+    // under #57's always-pair-the-sole-waiter design.
+    expect((await getStatus(app, userP)).status).toBe('waiting');
+    expect((await getStatus(app, userQ)).status).toBe('waiting');
+    expect((await getStatus(app, userR)).status).toBe('waiting');
+
+    await settleQueue(scheduler, getQueueService);
+
+    // Oldest (P) picks nearest rating among {Q, R}: R (1500, diff 300) over
+    // Q (1600, diff 400).
+    const statusP = await getStatus(app, userP);
+    expect(statusP.status).toBe('matched');
+    const matchId = statusP.matchId!;
+
+    const statusQ = await getStatus(app, userQ);
+    expect(statusQ.status).toBe('waiting');
+
+    const [row] = await db.select().from(matches).where(eq(matches.id, matchId));
+    expect(row).toBeDefined();
+    expect(row!.userAId).toBe(userP.id);
+    expect(row!.userBId).toBe(userR.id);
+
+    const rows = await db.select().from(matches);
+    const rowsInThisPool = rows.filter(
+      (candidate) => candidate.userAId === userP.id || candidate.userBId === userP.id
+    );
+    expect(rowsInThisPool.length).toBe(1);
+
+    await app.close();
+  });
+
+  it('concurrency safety over a larger pool: concurrent POSTs never double- or self-pair', async () => {
+    const { app, scheduler, getQueueService } = buildTestApp();
+    const users = await Promise.all([registerUser(app), registerUser(app), registerUser(app), registerUser(app)]);
+    const warbandIds = await Promise.all(
+      users.map((user, index) => saveWarband(app, user, index % 2 === 0 ? warbandA : warbandB))
+    );
+
+    const responses = await Promise.all(
+      users.map((user, index) =>
+        app.inject({
+          method: 'POST',
+          url: '/queue',
+          headers: { cookie: user.cookie, 'csrf-token': user.csrfToken },
+          payload: { warbandId: warbandIds[index] },
+        })
+      )
+    );
+    for (const response of responses) {
+      expect(response.statusCode).toBe(202);
+    }
+
+    await settleQueue(scheduler, getQueueService);
+
+    const statuses = await Promise.all(users.map((user) => getStatus(app, user)));
+    const matchedCount = statuses.filter((status) => status.status === 'matched').length;
+    const waitingCount = statuses.filter((status) => status.status === 'waiting').length;
+    expect(matchedCount).toBe(4);
+    expect(waitingCount).toBe(0);
+
+    const matchIds = new Set(statuses.map((status) => status.matchId));
+    expect(matchIds.size).toBe(2); // 4 users -> exactly two distinct matches
+
+    const rows = await db
+      .select()
+      .from(matches)
+      .where(
+        inArray(
+          matches.userAId,
+          users.map((user) => user.id)
+        )
+      );
+    expect(rows.length).toBe(2);
+
+    await app.close();
+  });
+
+  it('K-trigger: with maxPool 2, the second enqueue pairs immediately, without any timer fire', async () => {
+    const { app, scheduler, getQueueService } = buildTestApp(2);
+    const userA = await registerUser(app);
+    const userB = await registerUser(app);
+    const warbandAId = await saveWarband(app, userA, warbandA);
+    const warbandBId = await saveWarband(app, userB, warbandB);
+
+    await postEnqueue(app, userA, warbandAId);
+    expect(scheduler.pending).toBe(false); // lone waiter: not pairable yet
+
+    await postEnqueue(app, userB, warbandBId);
+    // K reached: no timer was ever armed for this pool.
+    expect(scheduler.pending).toBe(false);
+
+    await getQueueService().settled();
+
+    const statusA = await getStatus(app, userA);
+    expect(statusA.status).toBe('matched');
+
+    await app.close();
+  });
+
+  it('failure both-restore: a resolveMatch failure restores both entries to waiting and re-arms the timer', async () => {
+    const { app, scheduler, getQueueService } = buildTestApp();
+    const userA = await registerUser(app);
+    const userB = await registerUser(app);
+    const warbandAId = await saveWarband(app, userA, warbandA);
+    // An unsaved/foreign-looking warbandId can't be enqueued (404s before
+    // reaching enqueue()), so to exercise the resolver's own failure path
+    // we instead delete A's warband row out from under an in-flight
+    // pairing: resolveMatch re-validates snapshots against core's
+    // parseWarband at resolve time, but the queue snapshot itself
+    // (warbandRow.data) was already captured at enqueue() — so a more
+    // direct trigger is dropping the `warbands` FK, which resolveMatch's
+    // insert into `matches` depends on for referential integrity.
+    const warbandBId = await saveWarband(app, userB, warbandB);
+
+    await postEnqueue(app, userA, warbandAId);
+    await postEnqueue(app, userB, warbandBId);
+
+    // Force the pending pairing's resolveMatch to fail by deleting user A's
+    // account (and therefore, via FK cascade, their warband) after they've
+    // already been captured into the queue's in-memory pairing but before
+    // the pass has run resolveMatch's DB insert.
+    await db.execute(sql`DELETE FROM users WHERE id = ${userA.id}`);
+
+    expect(scheduler.pending).toBe(true);
+    scheduler.fire();
+    await getQueueService().settled();
+
+    // B is restored to waiting (A's account/session no longer resolves).
+    const statusB = await getStatus(app, userB);
+    expect(statusB.status).toBe('waiting');
+
+    // Both restorations happening (not just B) re-armed the timer, since
+    // the pool became pairable again the moment a third joiner arrives.
+    const userC = await registerUser(app);
+    const warbandCId = await saveWarband(app, userC, warbandA);
+    await postEnqueue(app, userC, warbandCId);
+    expect(scheduler.pending).toBe(true);
 
     await app.close();
   });
