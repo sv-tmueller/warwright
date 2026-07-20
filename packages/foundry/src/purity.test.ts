@@ -67,6 +67,23 @@ describe('scanSubmissionDirStatic (stage 2, static)', () => {
   it('accepts a pure sample that only imports @warwright/core', () => {
     expect(() => scanSubmissionDirStatic(path.join(SUBMISSIONS_DIR, 'sample-aggro'))).not.toThrow();
   });
+
+  it('rejects a submission dir containing a stray non-.ts, non-manifest.json file', () => {
+    const dir = makeTempSubmissionDir({
+      'manifest.json': '{}',
+      'behavior.ts': `
+        import type { Action, Behavior, UnitView, WorldView } from '@warwright/core';
+        function decide(self: UnitView, world: WorldView): Action {
+          void self; void world;
+          return { kind: 'idle' };
+        }
+        export const behavior: Behavior = { id: 'sneaky', decide };
+      `,
+      'helper.js': `module.exports = { evil: () => Math.random() };`,
+    });
+
+    expect(() => scanSubmissionDirStatic(dir)).toThrow(/stage 2 \(static/i);
+  });
 });
 
 describe('checkRunTwiceIdempotence (stage 2, runtime)', () => {

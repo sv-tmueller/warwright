@@ -88,4 +88,21 @@ describe('loadSubmission', () => {
       /stage 2 \(static/i,
     );
   });
+
+  it('rejects a submission whose entry is not a .ts file (stage 1)', async () => {
+    const dir = makeTempSubmissionDir('js-entry', {
+      'manifest.json': JSON.stringify({
+        id: 'js-entry',
+        author: 'foundry-fixtures',
+        entry: 'behavior.js',
+        build: { roleId: 'reaver', skillIds: ['cleave'], position: { x: 0, y: 0 } },
+        baseline: 'aggro-lowest-hp',
+        shape: 'general',
+      }),
+      'behavior.js': `module.exports = { id: 'js-entry', decide: () => ({ kind: 'idle' }) };`,
+    });
+
+    await expect(loadSubmission(dir)).rejects.toThrow(/stage 1/i);
+    await expect(loadSubmission(dir)).rejects.toThrow(/\.ts/i);
+  });
 });

@@ -13,15 +13,34 @@ import type { SubmissionManifest } from './manifest.js';
 // submission root -- is rejected.
 const CORE_SPECIFIER = '@warwright/core';
 
-function listTsFilesRecursive(dir: string): string[] {
+const MANIFEST_FILE_NAME = 'manifest.json';
+
+// Every entry under a submission dir must be a directory, a .ts file, or
+// manifest.json -- anything else (a sibling .js/.mjs helper, for instance)
+// would bypass this static scan entirely (it only scans .ts source) and
+// still be reachable at runtime via a relative import or the entry module,
+// so it is rejected outright rather than silently skipped (Fix 2, review of
+// PR #136). Symlinked files/dirs are rejected too: this walk never follows
+// a symlink, so a submission cannot point a scanned-looking path at
+// unscanned content living outside the submission dir.
+function collectTsFilesRecursive(dir: string, violations: string[]): string[] {
   const entries = readdirSync(dir, { withFileTypes: true });
   const files: string[] = [];
   for (const entry of entries) {
     const full = path.join(dir, entry.name);
+    if (entry.isSymbolicLink()) {
+      violations.push(`${full}: symlinks are not allowed in a submission directory`);
+      continue;
+    }
     if (entry.isDirectory()) {
-      files.push(...listTsFilesRecursive(full));
-    } else if (entry.isFile() && full.endsWith('.ts')) {
-      files.push(full);
+      files.push(...collectTsFilesRecursive(full, violations));
+    } else if (entry.isFile()) {
+      if (entry.name === MANIFEST_FILE_NAME) continue;
+      if (full.endsWith('.ts')) {
+        files.push(full);
+      } else {
+        violations.push(`${full}: only .ts files and manifest.json are allowed in a submission directory`);
+      }
     }
   }
   return files;
@@ -61,8 +80,8 @@ function isAllowedImport(specifier: string, fileDir: string, submissionRoot: str
  * imported (see load.ts) -- a forbidden-import submission never executes.
  */
 export function scanSubmissionDirStatic(dir: string): void {
-  const files = listTsFilesRecursive(dir);
   const violations: string[] = [];
+  const files = collectTsFilesRecursive(dir, violations);
 
   for (const file of files) {
     const contents = readFileSync(file, 'utf8');
