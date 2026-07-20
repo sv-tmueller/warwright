@@ -28,7 +28,7 @@ export const FORBIDDEN_REQUIRE = /\brequire\(/;
 // `constructor` chain) is the standard trick for reaching the Function
 // constructor without ever spelling "Function" in source, e.g.
 // `(() => {}).constructor.constructor('return Math.random()')()`.
-export const FORBIDDEN_EVAL = /\beval\(/;
+export const FORBIDDEN_EVAL = /\beval\s*\(/;
 export const FORBIDDEN_NEW_FUNCTION = /\bnew\s+Function\s*\(/;
 export const FORBIDDEN_CONSTRUCTOR_CHAIN = /\.constructor(?:\s*\.\s*constructor|\s*\[\s*['"]constructor['"]\s*\])/;
 

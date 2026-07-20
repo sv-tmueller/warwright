@@ -78,14 +78,25 @@ function isAllowedImport(specifier: string, fileDir: string, submissionRoot: str
 // the specifier-based allowlist above entirely, since there is no literal
 // text to check, so any such call is rejected outright rather than
 // silently let through (Fix 3, review of PR #136).
-const DYNAMIC_IMPORT_CALL_RE = /\bimport\s*\(([^()]*)\)/g;
-const STRING_LITERAL_ARG_RE = /^\s*['"][^'"]*['"]\s*$/;
+//
+// This intentionally does NOT try to capture and balance the parenthesised
+// argument (a call-expression argument like `getPath()` nests parens a
+// simple `[^()]*` capture group can't span). Instead it finds every
+// `import(` occurrence and re-tests the text starting at that occurrence
+// against an "allowed" shape: `import(` followed by nothing but a single
+// string literal and a closing `)`. Anything else at that occurrence --
+// a bare identifier, string concatenation, or a call expression -- fails
+// the allowed shape and is rejected, without ever needing to parse past
+// the first token of the argument.
+const IMPORT_CALL_RE = /\bimport\s*\(/g;
+const ALLOWED_IMPORT_CALL_RE = /^import\s*\(\s*['"][^'"]*['"]\s*\)/;
 
 function findDynamicImportViolations(contents: string, relativePath: string): string[] {
   const violations: string[] = [];
-  for (const match of contents.matchAll(DYNAMIC_IMPORT_CALL_RE)) {
-    const arg = match[1] ?? '';
-    if (!STRING_LITERAL_ARG_RE.test(arg)) {
+  for (const match of contents.matchAll(IMPORT_CALL_RE)) {
+    const startIndex = match.index;
+    const fromCallSite = contents.slice(startIndex);
+    if (!ALLOWED_IMPORT_CALL_RE.test(fromCallSite)) {
       violations.push(
         `${relativePath}: dynamic import(...) with a non string-literal specifier is not allowed`,
       );

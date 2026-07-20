@@ -89,6 +89,17 @@ describe('scanSubmissionDirStatic (stage 2, static)', () => {
     expect(() => scanSubmissionDirStatic(dir)).toThrow(/stage 2 \(static/i);
   });
 
+  it('rejects a dynamic import(...) whose argument is a call expression', () => {
+    const dir = makeTempSubmissionDir({
+      'behavior.ts': `
+        function getPath() { return 'node:fs'; }
+        void import(getPath());
+      `,
+    });
+
+    expect(() => scanSubmissionDirStatic(dir)).toThrow(/stage 2 \(static/i);
+  });
+
   it('rejects a submission dir containing a stray non-.ts, non-manifest.json file', () => {
     const dir = makeTempSubmissionDir({
       'manifest.json': '{}',

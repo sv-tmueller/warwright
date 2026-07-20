@@ -12,6 +12,10 @@ describe('findForbiddenTokenViolations (Fix 3 hardening)', () => {
     expect(findForbiddenTokenViolations('eval("1+1")')).not.toEqual([]);
   });
 
+  it('flags eval ( with whitespace before the paren', () => {
+    expect(findForbiddenTokenViolations('eval ("1+1")')).not.toEqual([]);
+  });
+
   it('flags new Function(', () => {
     expect(findForbiddenTokenViolations('new Function("return 1")()')).not.toEqual([]);
   });
