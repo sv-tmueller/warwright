@@ -22,26 +22,40 @@ function loadCommittedWarband(fileName: string): Warband {
 // baselineWarbandFor once per seed (see gauntlet.ts).
 const POLICY_1V1_BASELINE: Warband = loadCommittedWarband('policy-1v1-b.json');
 
+// The 'general' baseline roster's opponent Behavior id, fixed GATE-side
+// (see Fix 1, review of PR #137). A submission's manifest has NO `baseline`
+// field (see manifest.ts): the gauntlet's opponent brain must be a fixed
+// part of the gate, not something the submission itself can pick. Letting a
+// submission choose would let it dodge the bar entirely by naming an
+// opponent it knows it beats -- and, worse, a legal-looking value like
+// 'policy-smoke-v1' made the baseline UNIT itself throw an
+// obsDim-mismatch error (policy-smoke-v1 expects a 0-ally/1-enemy roster,
+// not the 'general' roster's 0-ally/2-enemy shape), which the gauntlet then
+// misattributed to the submission's own decide(). `aggro-lowest-hp` is a
+// simple, always-legal seed Behavior against any roster shape.
+export const GATE_GENERAL_BASELINE_BEHAVIOR_ID = 'aggro-lowest-hp';
+
 /**
  * Stage 3's baseline roster (team B) for a submission's declared `shape`
- * (see the #67b SUB_PLAN's "Stage 3" section).
+ * (see the #67b SUB_PLAN's "Stage 3" section). Both rosters below are fixed
+ * GATE-side, never submission-chosen (see Fix 1, review of PR #137):
  *
  * - `'1v1'`: EXACTLY `builds/policy-1v1-b.json`'s warband -- a single
- *   warden running `aggro-lowest-hp` at (15, 0). This is intentionally
- *   fixed by the shape, not by the submission's own declared `baseline`
- *   id: it is exactly the roster policy-smoke-v1 (the merged #66 export)
- *   was trained to beat (see gym/warwright_gym/training/smoke_run.py's
- *   `smoke_build_b`), so any '1v1'-shaped policy submission gets evaluated
- *   against the matchup it actually understands (0 allies, 1 enemy).
+ *   warden running `aggro-lowest-hp` at (15, 0), loaded once at module
+ *   load from the committed build file. This is exactly the roster
+ *   policy-smoke-v1 (the merged #66 export) was trained to beat (see
+ *   gym/warwright_gym/training/smoke_run.py's `smoke_build_b`), so any
+ *   '1v1'-shaped policy submission gets evaluated against the matchup it
+ *   actually understands (0 allies, 1 enemy).
  * - `'general'`: a two-unit roster of generic menders (no skills) both
- *   running the submission's own declared `manifest.baseline` seed
- *   Behavior id -- a step up from stage 2's single-baseline-unit
- *   `representativeReplay` (see purity.ts) convention, giving a submitter
- *   a genuine multi-opponent bar to clear. Deliberately a DIFFERENT roster
- *   shape (0 allies, 2 enemies) than '1v1' (0 allies, 1 enemy): a policy
- *   Behavior mistakenly declared `shape: 'general'` faces an
- *   observation of the wrong length and throws its own roster-shape error
- *   (see policy-smoke-v1.ts) -- surfaced as a clear stage-3 message by
+ *   running `GATE_GENERAL_BASELINE_BEHAVIOR_ID` -- a step up from stage 2's
+ *   single-baseline-unit `representativeReplay` (see purity.ts, which uses
+ *   the same gate-pinned id) convention, giving a submitter a genuine
+ *   multi-opponent bar to clear. Deliberately a DIFFERENT roster shape (0
+ *   allies, 2 enemies) than '1v1' (0 allies, 1 enemy): a policy Behavior
+ *   mistakenly declared `shape: 'general'` faces an observation of the
+ *   wrong length and throws its own roster-shape error (see
+ *   policy-smoke-v1.ts) -- surfaced as a clear stage-3 message by
  *   gauntlet.ts, per the SUB_PLAN's "surface a clear stage-3 message on a
  *   shape mismatch."
  */
@@ -51,18 +65,18 @@ export function baselineWarbandFor(manifest: SubmissionManifest): Warband {
   }
 
   return {
-    name: `foundry-baseline-general-${manifest.baseline}`,
+    name: `foundry-baseline-general-${GATE_GENERAL_BASELINE_BEHAVIOR_ID}`,
     units: [
       {
         roleId: 'mender',
         skillIds: [],
-        behaviorId: manifest.baseline,
+        behaviorId: GATE_GENERAL_BASELINE_BEHAVIOR_ID,
         position: { x: 500, y: 470 },
       },
       {
         roleId: 'mender',
         skillIds: [],
-        behaviorId: manifest.baseline,
+        behaviorId: GATE_GENERAL_BASELINE_BEHAVIOR_ID,
         position: { x: 500, y: 530 },
       },
     ],

@@ -14,7 +14,6 @@ const manifest = parseSubmissionManifest('sample-aggro', {
   author: 'foundry-fixtures',
   entry: 'behavior.ts',
   build: { roleId: 'reaver', skillIds: ['cleave'], position: { x: 0, y: 0 } },
-  baseline: 'aggro-lowest-hp',
   shape: 'general',
 });
 

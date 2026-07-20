@@ -55,7 +55,7 @@ function findBehaviorExport(mod: Record<string, unknown>, expectedId: string): B
  * text-based, exhaustive-but-not-airtight belt (see purity.ts's doc
  * comment) -- a cooperative-CI gate against accidental non-determinism, not
  * a hostile-input sandbox. (Stage 2's runtime idempotence check and stage 3
- * are the caller's responsibility -- see purity.ts / stage3.ts / gate.ts --
+ * are the caller's responsibility -- see purity.ts / stage3.ts / validate.ts --
  * since they need the loaded Behavior, not just the manifest.)
  */
 export async function loadSubmission(dir: string): Promise<LoadedSubmission> {

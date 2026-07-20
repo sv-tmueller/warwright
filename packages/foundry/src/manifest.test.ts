@@ -11,7 +11,6 @@ const validManifest = {
     skillIds: ['cleave'],
     position: { x: 0, y: 0 },
   },
-  baseline: 'aggro-lowest-hp',
   shape: 'general',
 };
 
@@ -68,11 +67,10 @@ describe('parseSubmissionManifest (stage 1)', () => {
     expect(() => parseSubmissionManifest('sample-aggro', bad)).toThrow(/skillIds/i);
   });
 
-  it('rejects a manifest whose baseline is not a registered core Behavior', () => {
-    const bad = { ...validManifest, baseline: 'not-a-behavior' };
+  it('rejects a manifest that still declares a "baseline" field: the gauntlet\'s opponent Behavior is gate-pinned, not submission-chosen (see baseline.ts)', () => {
+    const bad = { ...validManifest, baseline: 'aggro-lowest-hp' };
 
     expect(() => parseSubmissionManifest('sample-aggro', bad)).toThrow(/stage 1/i);
-    expect(() => parseSubmissionManifest('sample-aggro', bad)).toThrow(/baseline/i);
   });
 
   it('rejects a manifest whose id is the reserved external-behavior sentinel', () => {
@@ -80,13 +78,6 @@ describe('parseSubmissionManifest (stage 1)', () => {
 
     expect(() => parseSubmissionManifest(EXTERNAL_BEHAVIOR_ID, bad)).toThrow(/stage 1/i);
     expect(() => parseSubmissionManifest(EXTERNAL_BEHAVIOR_ID, bad)).toThrow(/external/i);
-  });
-
-  it('rejects a manifest whose baseline is the reserved external-behavior sentinel', () => {
-    const bad = { ...validManifest, baseline: EXTERNAL_BEHAVIOR_ID };
-
-    expect(() => parseSubmissionManifest('sample-aggro', bad)).toThrow(/stage 1/i);
-    expect(() => parseSubmissionManifest('sample-aggro', bad)).toThrow(/external/i);
   });
 
   it('rejects a manifest whose entry does not end in .ts', () => {

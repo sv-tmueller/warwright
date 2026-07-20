@@ -16,6 +16,18 @@ import type { SubmissionManifest } from './manifest.js';
 // is total, so 0.6 (the SUB_PLAN's own starting hypothesis) is kept as the
 // threshold: comfortably below both valid samples' measured rate and
 // comfortably above the invalid fixture's, with wide margin on both sides.
+//
+// IMPORTANT: both valid samples hit exactly 1.0 only because the baseline
+// rosters are DELIBERATELY WEAK -- the 'general' roster is two skill-less
+// menders (see baseline.ts's GATE_GENERAL_BASELINE_BEHAVIOR_ID roster) and
+// the '1v1' roster is a single lone warden (builds/policy-1v1-b.json). With
+// a roster this weak, 0.6 is really just separating "the submission fights
+// back at all" from "the submission idles/stalls" -- it is NOT yet a
+// meaningful skill bar. If the baseline roster is ever strengthened (more
+// units, skills, a smarter Behavior), this threshold MUST be re-measured
+// from scratch by the same procedure (run the full gauntlet for every
+// committed sample/fixture and record the numbers here) -- do not assume
+// 0.6 still sits in the gap.
 export const BASELINE_WIN_RATE_THRESHOLD = 0.6;
 
 export type Stage3Result = {

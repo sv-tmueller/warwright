@@ -35,7 +35,6 @@ describe('formatReport', () => {
         author: 'foundry-fixtures',
         entry: 'behavior.ts',
         build: { roleId: 'reaver', skillIds: ['cleave'], position: { x: 0, y: 0 } },
-        baseline: 'aggro-lowest-hp',
         shape: 'general',
       },
       stage3: {
