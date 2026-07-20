@@ -227,7 +227,18 @@ def compute_action_and_margins(
 def build_fixture_case(policy: ActorCriticPolicy, obs_row: np.ndarray) -> dict[str, Any]:
     action, margins = compute_action_and_margins(policy, obs_row)
     finite_margins = [margin for margin in margins if math.isfinite(margin)]
-    min_margin = min(finite_margins) if finite_margins else float("inf")
+    if not finite_margins:
+        # Unreachable with the current nvec ([5, 1, 6, 1001, 1001] always
+        # has at least one multi-option component), but guard it anyway:
+        # `json.dumps(float("inf"))` emits the non-standard `Infinity`
+        # token, which TS `JSON.parse` rejects -- fail loud here rather
+        # than silently writing a non-strictly-JSON fixture artifact.
+        raise ValueError(
+            "build_fixture_case: every action component has an infinite margin (no "
+            "multi-option component to compute a real minMargin from) -- refusing to write "
+            "a non-finite minMargin into the fixture."
+        )
+    min_margin = min(finite_margins)
     return {
         "obs": [int(value) for value in obs_row.tolist()],
         "action": action,
@@ -432,6 +443,21 @@ def generate_weights_and_fixture(
         assert weights_json_path is not None
         weights_bytes = weights_json_path.read_bytes()
         weights = json.loads(weights_bytes)
+        # Fail loud on the fixture-only regen path: regenerating
+        # observations under a bumped OBS_ENCODING_VERSION against a
+        # weights JSON exported under an older one would otherwise
+        # silently write a fixture whose obs layout doesn't match what
+        # produced the weights.
+        if weights.get("obsEncodingVersion") != OBS_ENCODING_VERSION:
+            raise ValueError(
+                "generate_weights_and_fixture: weights JSON at "
+                f"{weights_json_path} has obsEncodingVersion="
+                f"{weights.get('obsEncodingVersion')!r}, but the running "
+                f"warwright_gym.actions.OBS_ENCODING_VERSION is {OBS_ENCODING_VERSION}. "
+                "Regenerating fixture observations under a different encoding version than "
+                "the one the weights were exported under would silently produce a mismatched "
+                "artifact -- re-export the weights from a checkpoint instead."
+            )
         policy = weights_json_to_policy(weights)
         if weights_json_path.resolve() != weights_out.resolve():
             weights_bytes = _write_json_file(weights_out, weights)
@@ -445,7 +471,14 @@ def generate_weights_and_fixture(
         :TARGET_FIXTURE_CASES
     ]
     edge_case_observations = hand_built_edge_case_observations(deduped_rollout_observations[0])
-    all_observations = deduped_rollout_observations + edge_case_observations
+    # A hand-built edge variant can turn out to be a NO-OP mutation of its
+    # template (e.g. "skill ready" when the template's skill is already
+    # ready) -- re-dedupe the COMBINED list so no exact-duplicate
+    # observation (and thus duplicate fixture case) survives into the
+    # committed artifact.
+    all_observations = dedupe_observations(
+        deduped_rollout_observations + edge_case_observations
+    )
 
     candidate_cases = [build_fixture_case(policy, obs) for obs in all_observations]
     surviving_cases = filter_cases_by_margin(candidate_cases, MARGIN_EPSILON)

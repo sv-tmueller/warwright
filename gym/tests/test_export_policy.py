@@ -35,6 +35,7 @@ from warwright_gym.training.export_policy import (
     compute_action_and_margins,
     dedupe_observations,
     filter_cases_by_margin,
+    generate_weights_and_fixture,
     hand_built_edge_case_observations,
     policy_to_weights_json,
     sha256_hex,
@@ -224,6 +225,42 @@ def test_hand_built_edge_case_observations_include_a_low_enemy_hp_case():
     variants = hand_built_edge_case_observations(template)
 
     assert any(variant[enemy_hp_index] == 1 for variant in variants)
+
+
+def test_build_fixture_case_raises_when_every_component_has_an_infinite_margin(monkeypatch):
+    # Unreachable with the current nvec (target_slot is the only 1-way
+    # component), but `json.dumps(float("inf"))` emits the non-standard
+    # `Infinity` token, which TS `JSON.parse` rejects -- fail loud instead
+    # of silently writing a non-strictly-JSON artifact.
+    policy = _policy(seed=5)
+    obs = _obs_row(seed=5)
+
+    def _all_infinite_margins(_policy, _obs):
+        return [0, 0, 0, 0, 0], [float("inf")] * len(NVEC)
+
+    monkeypatch.setattr(
+        "warwright_gym.training.export_policy.compute_action_and_margins",
+        _all_infinite_margins,
+    )
+
+    with pytest.raises(ValueError, match="minMargin"):
+        build_fixture_case(policy, obs)
+
+
+def test_generate_weights_and_fixture_weights_json_path_raises_on_stale_obs_encoding_version(
+    tmp_path,
+):
+    stale_weights_path = tmp_path / "stale-weights.json"
+    stale_weights_path.write_text(
+        json.dumps({"obsEncodingVersion": OBS_ENCODING_VERSION + 1, "behaviorId": BEHAVIOR_ID})
+    )
+
+    with pytest.raises(ValueError, match="obsEncodingVersion"):
+        generate_weights_and_fixture(
+            weights_json_path=stale_weights_path,
+            weights_out=tmp_path / "weights-out.json",
+            fixture_out=tmp_path / "fixture-out.json",
+        )
 
 
 def test_sha256_hex_matches_hashlib():

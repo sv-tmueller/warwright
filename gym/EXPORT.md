@@ -84,9 +84,18 @@ which is unchanged) to sample the SAME real, in-distribution fight at a
 pinned seed range; capped to the `TARGET_FIXTURE_CASES = 64` target,
 plus 5 hand-built edge cases (the agent's only equipped skill, "cleave",
 ready vs. on cooldown; the enemy near death vs. at full hp; the agent
-itself near death) = 69 candidates.
+itself near death) = 69 candidates before dedup.
 
-All 69 candidates survived the `MARGIN_EPSILON = 0.01` near-tie filter
+Two of those 5 edge variants turned out to be NO-OP mutations of their
+template observation (the template's "cleave" cooldown was already 0, so
+the "skill ready" variant reproduced it exactly; the template's enemy was
+already at full hp, so the "enemy full hp" variant reproduced it exactly),
+so `generate_weights_and_fixture` re-dedupes the combined 64-rollout +
+5-edge observation list (`dedupe_observations`, exact-duplicate rows,
+first-seen order preserved) before building fixture cases -- 69 candidate
+observations, 2 exact duplicates dropped, **67 distinct candidates**.
+
+All 67 candidates survived the `MARGIN_EPSILON = 0.01` near-tie filter
 (`target_slot` is always `inf`-margin on this 1-enemy build -- a single
 valid value, never a near-tie by construction; `minMargin` across the
 other four components ranged `[0.0156, 0.0783]`, comfortably above the
@@ -97,9 +106,54 @@ formatVersion:     1
 obsEncodingVersion: 1
 behaviorId:        policy-smoke-v1
 marginEpsilon:     0.01
-numCandidateCases: 69
-numSurvivingCases: 69
+numCandidateCases: 67
+numSurvivingCases: 67
 ```
+
+## TS mirror contract (#66b)
+
+The committed weights JSON and `inference-parity.fixture.json` are the
+parity contract for #66b's future pure-TypeScript float64 inference
+Behavior. That Behavior must reproduce this exact forward pipeline, in
+this exact order, for every fixture case's `obs` to reproduce its
+committed `action`:
+
+1. **Raw int observation → featurize**: divide each field by its
+   field-class divisor (`HP_DIVISOR = 1024`, `POS_DIVISOR = 1024`,
+   `COOLDOWN_DIVISOR = 64`, `DISTANCE_SQUARED_DIVISOR = 2**21`, unit id
+   unscaled) -- EXCEPT a `-1` (`SKILL_COOLDOWN_ABSENT`) cooldown value,
+   which passes through UNCHANGED, never divided. Every divisor is a
+   power of two so the division is exact in binary floating point. See
+   `featurize.py`'s `_DIVISORS` map and module docstring for the
+   authoritative per-index field-class assignment (source of truth --
+   never hardcode a parallel layout).
+2. **trunk1**: `Linear` over the featurized vector, weight layout
+   `[out][in]` (torch convention: `weight[i]` is output unit `i`'s
+   incoming-weight row), `y = W·x + b`.
+3. **tanh** elementwise over trunk1's output.
+4. **trunk2**: `Linear` (same `[out][in]`/`y = W·x + b` layout) over
+   trunk1's tanh output.
+5. **tanh** elementwise over trunk2's output.
+6. **actorHead**: `Linear` (same layout) over trunk2's tanh output,
+   producing one flat logits vector of length `sum(nvec)`.
+7. **Split** the flat logits vector into one segment per `nvec` entry, in
+   `nvec` order (`[kind, targetSlot, skillIndex, moveX, moveY]` for this
+   build).
+8. **Per-component argmax**: the action for each component is the index
+   of its segment's maximum logit. On an exact tie, the LOWEST index
+   wins (this only matters for near-ties in principle -- the fixture's
+   `minMargin` filter excludes every case where an argmax is within
+   `marginEpsilon` of flipping, so no committed case actually exercises
+   tie-breaking; a correct implementation still must not raise or pick
+   the wrong side on one).
+
+`policy.py` (`ActorCriticPolicy._trunk`/`actor_logits`) is the source of
+truth for the op order (steps 2-7); `featurize.py` is the source of truth
+for the divisor map and the absent-cooldown passthrough (step 1). No
+running-statistics normalization, no non-power-of-two divisor, and no
+step reordering -- any of those would silently break bit-for-bit parity
+with the fixture without necessarily breaking `assert_enough_cases` or
+any other loud signal.
 
 ## `packages/core` unaffected
 
@@ -108,3 +162,23 @@ Confirmed no `.ts` file changed and `packages/core/src/sim/__snapshots__/golden.
 `pnpm --filter @warwright/core test` passes (223/223) with only the two
 new JSON data files present under `packages/core/src/content/behaviors/policy/`
 (not referenced by any `.ts` module yet -- #66b wires that up).
+
+## Fixture-only regen (PR #132 review round: duplicate-case dedup)
+
+A follow-up regen re-ran `export_policy.py`'s `--weights-json` path
+(fixture-only; the committed weights JSON bytes are UNCHANGED --
+`weightsSha256` still `bc9413...`) after fixing the duplicate-observation
+bug described above (the combined rollout+edge observation list is now
+deduped before building fixture cases):
+
+```bash
+uv run --directory gym --group train python -m warwright_gym.training.export_policy \
+  --weights-json packages/core/src/content/behaviors/policy/policy-smoke-v1.weights.json
+```
+
+This also exercises the regen-path guard `generate_weights_and_fixture`
+now runs first on the `--weights-json` path: it fails loud if the
+weights JSON's `obsEncodingVersion` doesn't match the running
+`warwright_gym.actions.OBS_ENCODING_VERSION`, so regenerating fixture
+observations under a bumped encoding against old-encoding weights can
+never silently produce a mismatched artifact.

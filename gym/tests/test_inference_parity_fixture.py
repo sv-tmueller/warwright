@@ -28,7 +28,11 @@ pytest.importorskip("torch")
 
 import torch
 
-from warwright_gym.training.export_policy import compute_action_and_margins, weights_json_to_policy
+from warwright_gym.training.export_policy import (
+    MIN_FIXTURE_CASES,
+    compute_action_and_margins,
+    weights_json_to_policy,
+)
 
 _ARTIFACT_DIR = (
     Path(__file__).resolve().parents[2] / "packages/core/src/content/behaviors/policy"
@@ -73,9 +77,25 @@ def test_fixture_behavior_id_and_obs_encoding_version_match_the_committed_weight
 def test_fixture_has_a_nonempty_case_set_all_at_or_above_its_declared_margin_epsilon():
     fixture = _load_fixture()
 
-    assert len(fixture["cases"]) > 0
+    assert len(fixture["cases"]) >= MIN_FIXTURE_CASES
     for case in fixture["cases"]:
         assert case["minMargin"] >= fixture["marginEpsilon"]
+
+
+def test_fixture_cases_have_no_duplicate_observations():
+    # hand_built_edge_case_observations mutates a rollout observation
+    # template; a variant that turns out to be a NO-OP mutation (e.g. the
+    # "skill ready" edge case when the template's skill is already ready)
+    # would otherwise silently produce an exact duplicate of another case
+    # -- see export_policy.generate_weights_and_fixture, which dedupes the
+    # combined rollout+edge observation list before building fixture cases.
+    fixture = _load_fixture()
+
+    seen: set[tuple[int, ...]] = set()
+    for index, case in enumerate(fixture["cases"]):
+        key = tuple(case["obs"])
+        assert key not in seen, f"case {index}: duplicate observation of an earlier case"
+        seen.add(key)
 
 
 def test_recomputed_actions_and_margins_match_the_committed_fixture_exactly():
@@ -95,6 +115,12 @@ def test_recomputed_actions_and_margins_match_the_committed_fixture_exactly():
         finite_margins = [margin for margin in margins if math.isfinite(margin)]
         min_margin = min(finite_margins) if finite_margins else float("inf")
 
+        # "...exactly" (the test name) holds for the ACTION: it's an integer
+        # per-component argmax, asserted with `==`, no tolerance. The
+        # `minMargin` FLOAT is compared with `math.isclose` instead -- that
+        # tolerance covers only float32 summation reduction-order variance
+        # between this recomputation and the run that produced the committed
+        # fixture, not any slack in the action itself.
         assert action == case["action"], f"case {index}: action drifted from the committed fixture"
         assert math.isclose(min_margin, case["minMargin"], rel_tol=1e-6, abs_tol=1e-6), (
             f"case {index}: minMargin drifted from the committed fixture "
