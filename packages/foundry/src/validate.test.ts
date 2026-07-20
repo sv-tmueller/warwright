@@ -18,14 +18,21 @@ describe('validateSubmission', () => {
     expect(report.stage3.winRate).toBeGreaterThanOrEqual(BASELINE_WIN_RATE_THRESHOLD);
   });
 
-  it('runs a valid exported-policy submission (sample-policy) through all 3 stages to a pass', async () => {
-    const report = await validateSubmission(path.join(SUBMISSIONS_DIR, 'sample-policy'));
+  // Longer timeout: 25 seeds of policy-smoke-v1 inference is noticeably
+  // slower than the rule-based sample-aggro case, and can cross the
+  // default 5000ms under full-monorepo test-suite CPU contention.
+  it(
+    'runs a valid exported-policy submission (sample-policy) through all 3 stages to a pass',
+    async () => {
+      const report = await validateSubmission(path.join(SUBMISSIONS_DIR, 'sample-policy'));
 
-    expect(report.ok).toBe(true);
-    if (!report.ok) throw new Error('expected ok');
-    expect(report.manifest.id).toBe('sample-policy');
-    expect(report.stage3.status).toBe('pass');
-  });
+      expect(report.ok).toBe(true);
+      if (!report.ok) throw new Error('expected ok');
+      expect(report.manifest.id).toBe('sample-policy');
+      expect(report.stage3.status).toBe('pass');
+    },
+    20_000,
+  );
 
   it('rejects fixtures/bad-manifest at stage 1', async () => {
     const report = await validateSubmission(path.join(FIXTURES_DIR, 'bad-manifest'));

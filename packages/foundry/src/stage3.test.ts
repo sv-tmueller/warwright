@@ -43,16 +43,23 @@ describe('runStage3', () => {
     expect(result.winRate).toBeGreaterThanOrEqual(BASELINE_WIN_RATE_THRESHOLD);
   });
 
-  it('clears the bar for submissions/sample-policy (exported policy, 1v1 shape)', async () => {
-    const { manifest: loadedManifest, behavior } = await loadSubmission(
-      path.join(SUBMISSIONS_DIR, 'sample-policy'),
-    );
+  // Longer timeout: 25 seeds of policy-smoke-v1 inference is noticeably
+  // slower than the rule-based sample-aggro case, and can cross the
+  // default 5000ms under full-monorepo test-suite CPU contention.
+  it(
+    'clears the bar for submissions/sample-policy (exported policy, 1v1 shape)',
+    async () => {
+      const { manifest: loadedManifest, behavior } = await loadSubmission(
+        path.join(SUBMISSIONS_DIR, 'sample-policy'),
+      );
 
-    const result = runStage3(loadedManifest, behavior);
+      const result = runStage3(loadedManifest, behavior);
 
-    expect(result.status).toBe('pass');
-    expect(result.winRate).toBeGreaterThanOrEqual(BASELINE_WIN_RATE_THRESHOLD);
-  });
+      expect(result.status).toBe('pass');
+      expect(result.winRate).toBeGreaterThanOrEqual(BASELINE_WIN_RATE_THRESHOLD);
+    },
+    20_000,
+  );
 
   it('rejects fixtures/weak-idle at stage 3: win rate ~0, below the bar', async () => {
     const { manifest: loadedManifest, behavior } = await loadSubmission(

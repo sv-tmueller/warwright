@@ -31,5 +31,10 @@ describe('foundry gauntlet reproducibility', () => {
       expect(second.matches.map((m) => m.winner)).toEqual(first.matches.map((m) => m.winner));
       expect(second.matches.map((m) => m.hash)).toEqual(first.matches.map((m) => m.hash));
     },
+    // Longer timeout: this runs the 25-seed gauntlet TWICE (50 matches),
+    // and for sample-policy that's 50 rounds of policy-smoke-v1 inference
+    // -- can cross the default 5000ms under full-monorepo test-suite CPU
+    // contention.
+    20_000,
   );
 });
