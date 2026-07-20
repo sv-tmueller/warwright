@@ -161,18 +161,38 @@ function representativeReplay(manifest: SubmissionManifest): Replay {
   };
 }
 
+function runRepresentativeMatch(
+  manifest: SubmissionManifest,
+  replay: Replay,
+  behavior: Behavior,
+  runLabel: 'first' | 'second',
+): ReturnType<typeof runMatchWithBehaviors> {
+  try {
+    return runMatchWithBehaviors(replay, [behavior]);
+  } catch (error) {
+    throw new Error(
+      `Stage 2 (runtime) rejected submission "${manifest.id}": decide() threw during the ` +
+        `${runLabel} representative match run (${String(error instanceof Error ? error.message : error)})`,
+      { cause: error },
+    );
+  }
+}
+
 /**
  * Stage 2, runtime half: runs one representative match TWICE in the SAME
  * process (a fresh process would reset module state and hide the bug) via
  * runMatchWithBehaviors, and requires identical event-log hashes. A
  * submission with module-level mutable state produces a divergent second
- * hash and is rejected.
+ * hash and is rejected. Both runs are wrapped so a decide() that throws
+ * mid-match surfaces as a clearly-attributed Stage 2 (runtime) error too,
+ * keeping the stage-reporting contract uniform instead of letting the raw
+ * exception escape unattributed.
  */
 export function checkRunTwiceIdempotence(manifest: SubmissionManifest, behavior: Behavior): void {
   const replay = representativeReplay(manifest);
 
-  const first = runMatchWithBehaviors(replay, [behavior]);
-  const second = runMatchWithBehaviors(replay, [behavior]);
+  const first = runRepresentativeMatch(manifest, replay, behavior, 'first');
+  const second = runRepresentativeMatch(manifest, replay, behavior, 'second');
 
   if (first.hash !== second.hash) {
     throw new Error(

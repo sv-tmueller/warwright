@@ -139,6 +139,19 @@ describe('checkRunTwiceIdempotence (stage 2, runtime)', () => {
     expect(() => checkRunTwiceIdempotence(manifest, pureBehavior)).not.toThrow();
   });
 
+  it('surfaces a decide() that throws mid-match as a clearly-attributed Stage 2 (runtime) error', () => {
+    const throwingBehavior: Behavior = {
+      id: 'sample-aggro',
+      decide: () => {
+        throw new Error('boom: submission decide() blew up');
+      },
+    };
+
+    expect(() => checkRunTwiceIdempotence(manifest, throwingBehavior)).toThrow(
+      /stage 2 \(runtime/i,
+    );
+  });
+
   it('rejects a Behavior with module-level mutable state (diverging hashes across two same-process runs)', () => {
     // Every third `decide` call idles instead of moving/attacking: harmless
     // within a single run, but the counter is NOT reset between the two
