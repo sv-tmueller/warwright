@@ -21,8 +21,11 @@ export const OBS_ENCODING_VERSION = 1;
 
 // Sentinel written into a self-block skill-cooldown slot when the unit does
 // not have that catalog skill equipped. Ticks are always >= 0, so -1 can
-// never collide with a real cooldown value.
-const SKILL_COOLDOWN_ABSENT = -1;
+// never collide with a real cooldown value. Exported so
+// content/behaviors/policy/featurize.ts (the TS mirror of
+// gym/warwright_gym/featurize.py) can special-case it without a duplicated
+// magic number.
+export const SKILL_COOLDOWN_ABSENT = -1;
 
 // --- Self block (one per encodeObservation call) -------------------------
 // Field order, indices 0..OBS_SELF_FIELD_COUNT-1:
@@ -98,26 +101,32 @@ function encodeUnitBlock(other: Unit, self: Unit): number[] {
 // Fixed-order flat observation vector for `unitId`: the self block (hp,
 // maxHp, pos, attack cooldown, per-catalog-skill cooldowns), then one block
 // per ALLY in ascending id order (excluding self), then one block per ENEMY
-// in ascending id order. `world.units` is already ascending-id ordered (see
+// in ascending id order. `units` is expected ascending-id ordered (see
 // sim/types.ts) and dead units (hp <= 0) are never removed from it, so a
 // given match's observation length is constant across every tick of that
-// match, win or lose.
-export function encodeObservation(world: WorldState, unitId: number): number[] {
-  const self = world.units.find((unit) => unit.id === unitId);
+// match, win or lose. Units-array-level so callers that only have a live
+// `Unit[]` (not a full `WorldState`) -- e.g. sim/loop.ts's `WorldView.
+// observationOf` seam -- can reuse this without constructing one.
+export function encodeObservationFromUnits(units: readonly Unit[], unitId: number): number[] {
+  const self = units.find((unit) => unit.id === unitId);
   if (self === undefined) {
-    throw new Error(`encodeObservation: no unit with id ${unitId}`);
+    throw new Error(`encodeObservationFromUnits: no unit with id ${unitId}`);
   }
 
   const vector = encodeSelfBlock(self);
-  for (const unit of world.units) {
+  for (const unit of units) {
     if (unit.id === self.id || unit.team !== self.team) continue;
     vector.push(...encodeUnitBlock(unit, self));
   }
-  for (const unit of world.units) {
+  for (const unit of units) {
     if (unit.team === self.team) continue;
     vector.push(...encodeUnitBlock(unit, self));
   }
   return vector;
+}
+
+export function encodeObservation(world: WorldState, unitId: number): number[] {
+  return encodeObservationFromUnits(world.units, unitId);
 }
 
 // Tagged integer tuple encoding for the Action union (sim/behavior.ts).
@@ -130,11 +139,14 @@ export function encodeObservation(world: WorldState, unitId: number): number[] {
 //   cast:         [4, targetId, 0,    skillIndex]  (skillIndex: skill
 //                                                    catalog position, see
 //                                                    skillCatalog above)
-const ACTION_KIND_IDLE = 0;
-const ACTION_KIND_MOVE = 1;
-const ACTION_KIND_MOVE_TOWARD = 2;
-const ACTION_KIND_ATTACK = 3;
-const ACTION_KIND_CAST = 4;
+// Exported so content/behaviors/policy/policy-smoke-v1.ts (the exported
+// inference Behavior) can build a wire action tuple from an inferred
+// component kind without a duplicated magic-number table.
+export const ACTION_KIND_IDLE = 0;
+export const ACTION_KIND_MOVE = 1;
+export const ACTION_KIND_MOVE_TOWARD = 2;
+export const ACTION_KIND_ATTACK = 3;
+export const ACTION_KIND_CAST = 4;
 
 export function encodeAction(action: Action): number[] {
   switch (action.kind) {

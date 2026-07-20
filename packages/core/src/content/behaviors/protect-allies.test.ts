@@ -48,6 +48,12 @@ function throwingEnemies(): WorldView['enemiesOf'] {
   };
 }
 
+function throwingObservation(): WorldView['observationOf'] {
+  return () => {
+    throw new Error('observationOf should never be read by protect-allies');
+  };
+}
+
 const self = unit(1, 100, 100);
 
 describe('protectAllies', () => {
@@ -59,7 +65,11 @@ describe('protectAllies', () => {
     // ally A: 40/200 = 20%; ally B: 30/80 = 37.5% -- raw hp would wrongly favor B (30 < 40)
     const allyA = unit(2, 40, 200);
     const allyB = unit(3, 30, 80);
-    const world: WorldView = { alliesOf: () => [allyA, allyB], enemiesOf: throwingEnemies() };
+    const world: WorldView = {
+      alliesOf: () => [allyA, allyB],
+      enemiesOf: throwingEnemies(),
+      observationOf: throwingObservation(),
+    };
     expect(protectAllies.decide(self, world, throwingRng())).toEqual({
       kind: 'move-toward',
       targetId: 2,
@@ -70,7 +80,11 @@ describe('protectAllies', () => {
     // ally A: 50/100 = 50%; ally B: 25/50 = 50% -- tied ratio
     const allyA = unit(2, 50, 100);
     const allyB = unit(3, 25, 50);
-    const world: WorldView = { alliesOf: () => [allyA, allyB], enemiesOf: throwingEnemies() };
+    const world: WorldView = {
+      alliesOf: () => [allyA, allyB],
+      enemiesOf: throwingEnemies(),
+      observationOf: throwingObservation(),
+    };
     expect(protectAllies.decide(self, world, stubRng([0]))).toEqual({
       kind: 'move-toward',
       targetId: 2,
@@ -82,14 +96,22 @@ describe('protectAllies', () => {
   });
 
   it('idles when there are no allies', () => {
-    const world: WorldView = { alliesOf: () => [], enemiesOf: throwingEnemies() };
+    const world: WorldView = {
+      alliesOf: () => [],
+      enemiesOf: throwingEnemies(),
+      observationOf: throwingObservation(),
+    };
     expect(protectAllies.decide(self, world, throwingRng())).toEqual({ kind: 'idle' });
   });
 
   it('is deterministic: identical inputs yield identical actions', () => {
     const allyA = unit(2, 40, 200);
     const allyB = unit(3, 30, 80);
-    const world: WorldView = { alliesOf: () => [allyA, allyB], enemiesOf: throwingEnemies() };
+    const world: WorldView = {
+      alliesOf: () => [allyA, allyB],
+      enemiesOf: throwingEnemies(),
+      observationOf: throwingObservation(),
+    };
     const first = protectAllies.decide(self, world, throwingRng());
     const second = protectAllies.decide(self, world, throwingRng());
     expect(first).toEqual(second);

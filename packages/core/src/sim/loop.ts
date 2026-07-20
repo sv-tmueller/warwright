@@ -7,6 +7,7 @@ import { isInRange } from './resolve/geometry.js';
 import { moveUnitToward } from './resolve/movement.js';
 import { resolveSkillEffect } from './resolve/skills.js';
 import { tickStatuses } from './resolve/status.js';
+import { encodeObservationFromUnits } from './observation.js';
 import type { Unit, WorldState, Winner } from './types.js';
 
 function toUnitView(unit: Unit): UnitView {
@@ -42,6 +43,12 @@ function buildWorldView(units: Unit[]): WorldView {
       return living()
         .filter((unit) => unit.team !== self.team)
         .map(toUnitView);
+    },
+    observationOf(self) {
+      // Over ALL of `units`, dead ones included -- matches
+      // sim/observation.ts's encodeObservation exactly (training's obs
+      // layout), unlike alliesOf/enemiesOf's living-only view above.
+      return encodeObservationFromUnits(units, self.id);
     },
   };
 }

@@ -7,6 +7,7 @@ import { createContentRegistry } from '../content/registry.js';
 import type { ContentRegistry } from '../content/registry.js';
 import { EXTERNAL_BEHAVIOR_ID } from './constants.js';
 import { checkWinner, stepTick } from './loop.js';
+import { encodeObservationFromUnits } from './observation.js';
 
 function makeUnit(overrides: Partial<Unit> = {}): Unit {
   return {
@@ -370,6 +371,42 @@ describe('stepTick', () => {
 
     expect(victim.hp).toBe(0);
     expect(observedEnemyIds).toEqual([]);
+  });
+
+  it('builds a WorldView whose observationOf includes dead units and matches encodeObservationFromUnits', () => {
+    // Unlike enemiesOf/alliesOf (living-only), observationOf must reflect
+    // ALL units (including dead ones) so a policy Behavior can reproduce the
+    // exact training observation -- see sim/behavior.ts's WorldView doc.
+    const killer = makeUnit({
+      id: 1,
+      team: 'A',
+      behaviorId: 'killer',
+      pos: { x: 0, y: 0 },
+      attackDamage: 999,
+      attackRangeSquared: 10000,
+    });
+    const victim = makeUnit({ id: 2, team: 'B', behaviorId: 'idle', pos: { x: 1, y: 0 }, hp: 10 });
+    const witness = makeUnit({ id: 3, team: 'A', behaviorId: 'witness', pos: { x: 0, y: 0 } });
+    const world = makeWorld([killer, victim, witness]);
+
+    let observedVector: readonly number[] | null = null;
+    const registry = makeRegistry({
+      killer: () => ({ kind: 'attack', targetId: 2 }),
+      idle: () => idle,
+      witness: (self, worldView) => {
+        observedVector = worldView.observationOf(self);
+        return idle;
+      },
+    });
+
+    stepTick(world, registry);
+
+    expect(victim.hp).toBe(0);
+    // The victim died earlier in this same action phase, yet observationOf
+    // still includes its (now-dead) block -- observationOf reads
+    // `world.units` directly, never the living() filter alliesOf/enemiesOf
+    // use.
+    expect(observedVector).toEqual(encodeObservationFromUnits(world.units, 3));
   });
 
   it('housekeeping applies dots (which may kill), then statuses, then cooldowns, for units alive at phase start', () => {

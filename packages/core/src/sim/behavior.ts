@@ -25,6 +25,13 @@ export type UnitView = {
 export type WorldView = {
   alliesOf(self: UnitView): readonly UnitView[];
   enemiesOf(self: UnitView): readonly UnitView[];
+  // The flat observation vector for `self`, matching sim/observation.ts's
+  // encodeObservation layout EXACTLY (including dead units' blocks -- unlike
+  // alliesOf/enemiesOf, which are living-only). A Behavior cannot
+  // reconstruct the training observation from alliesOf/enemiesOf alone, so
+  // this seam exists for exported inference Behaviors (content/behaviors/
+  // policy/) that must feed a policy trained on that exact vector.
+  observationOf(self: UnitView): readonly number[];
 };
 
 // Frozen intent union consumed by the P0-13 tick loop.

@@ -48,6 +48,12 @@ function throwingAllies(): WorldView['alliesOf'] {
   };
 }
 
+function throwingObservation(): WorldView['observationOf'] {
+  return () => {
+    throw new Error('observationOf should never be read by aggro-lowest-hp');
+  };
+}
+
 const self = unit(1, 100);
 
 describe('aggroLowestHp', () => {
@@ -57,7 +63,11 @@ describe('aggroLowestHp', () => {
 
   it('attacks the enemy with the lowest hp among distinct values', () => {
     const enemies = [unit(2, 50), unit(3, 10), unit(4, 30)];
-    const world: WorldView = { alliesOf: throwingAllies(), enemiesOf: () => enemies };
+    const world: WorldView = {
+      alliesOf: throwingAllies(),
+      enemiesOf: () => enemies,
+      observationOf: throwingObservation(),
+    };
     expect(aggroLowestHp.decide(self, world, throwingRng())).toEqual({
       kind: 'attack',
       targetId: 3,
@@ -66,7 +76,11 @@ describe('aggroLowestHp', () => {
 
   it('breaks a tie at minimum hp using rng, picking each tied enemy in turn', () => {
     const enemies = [unit(2, 10), unit(3, 10), unit(4, 50)];
-    const world: WorldView = { alliesOf: throwingAllies(), enemiesOf: () => enemies };
+    const world: WorldView = {
+      alliesOf: throwingAllies(),
+      enemiesOf: () => enemies,
+      observationOf: throwingObservation(),
+    };
     expect(aggroLowestHp.decide(self, world, stubRng([0]))).toEqual({
       kind: 'attack',
       targetId: 2,
@@ -78,13 +92,21 @@ describe('aggroLowestHp', () => {
   });
 
   it('idles when there are no enemies', () => {
-    const world: WorldView = { alliesOf: throwingAllies(), enemiesOf: () => [] };
+    const world: WorldView = {
+      alliesOf: throwingAllies(),
+      enemiesOf: () => [],
+      observationOf: throwingObservation(),
+    };
     expect(aggroLowestHp.decide(self, world, throwingRng())).toEqual({ kind: 'idle' });
   });
 
   it('moves toward the selected target when it is out of attack range', () => {
     const enemies = [unit(2, 10, { x: 100, y: 0 })];
-    const world: WorldView = { alliesOf: throwingAllies(), enemiesOf: () => enemies };
+    const world: WorldView = {
+      alliesOf: throwingAllies(),
+      enemiesOf: () => enemies,
+      observationOf: throwingObservation(),
+    };
     expect(aggroLowestHp.decide(self, world, throwingRng())).toEqual({
       kind: 'move-toward',
       targetId: 2,
@@ -93,7 +115,11 @@ describe('aggroLowestHp', () => {
 
   it('attacks the selected target when it is in attack range', () => {
     const enemies = [unit(2, 10, { x: 0, y: 0 })];
-    const world: WorldView = { alliesOf: throwingAllies(), enemiesOf: () => enemies };
+    const world: WorldView = {
+      alliesOf: throwingAllies(),
+      enemiesOf: () => enemies,
+      observationOf: throwingObservation(),
+    };
     expect(aggroLowestHp.decide(self, world, throwingRng())).toEqual({
       kind: 'attack',
       targetId: 2,
@@ -102,7 +128,11 @@ describe('aggroLowestHp', () => {
 
   it('is deterministic: identical inputs yield identical actions', () => {
     const enemies = [unit(2, 50), unit(3, 10), unit(4, 30)];
-    const world: WorldView = { alliesOf: throwingAllies(), enemiesOf: () => enemies };
+    const world: WorldView = {
+      alliesOf: throwingAllies(),
+      enemiesOf: () => enemies,
+      observationOf: throwingObservation(),
+    };
     const first = aggroLowestHp.decide(self, world, throwingRng());
     const second = aggroLowestHp.decide(self, world, throwingRng());
     expect(first).toEqual(second);
