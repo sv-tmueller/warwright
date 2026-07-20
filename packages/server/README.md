@@ -13,6 +13,8 @@ Auth (register/login/logout/session lifecycle, CSRF, rate limiting) landed in #5
 | `HOST` | no | `0.0.0.0` | Host/interface the Fastify app binds to. |
 | `SESSION_SECRET` | yes | — | Signs session cookies and CSRF secrets. At least 32 characters, fail-loud. `docker run` and any deployment now need this set. |
 | `COOKIE_SECURE` | no | `false` | Whether session cookies get the `secure` attribute. Leave off for local (non-HTTPS) dev; set `true` in production. |
+| `QUEUE_WINDOW_MS` | no | `5000` | Matchmaking batching-window duration (ms) — see Matchmaking queue below. |
+| `QUEUE_MAX_POOL` | no | `8` | Pool size (K) that triggers an immediate pairing pass without waiting for the window timer; must be at least 2. |
 
 ## Local Postgres (docker-compose)
 
@@ -90,15 +92,25 @@ Endpoints (all under `/warbands`, all requiring an authenticated session — 401
 
 ## Matchmaking queue
 
-`POST /queue` submits intent to be matched: `{ warbandId }`, a saved warband owned by the caller (see Warbands above — a foreign or nonexistent id 404s). Pairing is by nearest rating: the queue reads the caller's `ratings` row lazily (`SELECT ... WHERE user_id = :id`; no row means `DEFAULT_RATING` (1500), matching the `ratings.rating` column's own default — nothing is inserted by this read; rating *writes* are #58). If another user is already waiting, the caller is paired with them (nearest-rating scan, FIFO tie-break) and the route calls #103's `resolveMatch` inline — the earlier-enqueued player is always `A`, the joiner `B` — returning `200 { status: 'matched', matchId, result }`. If nobody is waiting, the caller is enqueued and gets `202 { status: 'waiting' }`. A second `POST` while already queued (or mid-resolution) is `409 { error: 'Already queued' }`.
+`POST /queue` submits intent to be matched: `{ warbandId }`, a saved warband owned by the caller (see Warbands above — a foreign or nonexistent id 404s). The queue reads the caller's `ratings` row lazily (`SELECT ... WHERE user_id = :id`; no row means `DEFAULT_RATING` (1500), matching the `ratings.rating` column's own default — nothing is inserted by this read). A second `POST` while already queued (or mid-resolution) is `409 { error: 'Already queued' }`.
+
+**Since #108, `POST /queue` never pairs inline and its response contract is `202`/`404`/`409` only** (no more inline `200 matched`). Every successful enqueue returns `202 { status: 'waiting' }` — pairing happens later, off the request path, in a **batching-window accumulation policy**: waiting players accumulate in a pool until either a timer fires `QUEUE_WINDOW_MS` after the pool becomes pairable (reaches 2 waiters), or the pool reaches `QUEUE_MAX_POOL` (K), whichever comes first. When a pass runs, it sorts the pool FIFO by enqueue order and repeatedly takes the oldest waiter and pairs them with the nearest-rating opponent (the same `selectOpponent` scan as before — nearest rating, FIFO tie-break — now actually decisive over a real multi-candidate pool instead of a single waiter) until fewer than two remain; any odd leftover stays waiting for the next pass. The earlier-enqueued player of each pair is always `A`, its opponent `B`.
+
+This is a forced consequence of any accumulation policy: the joiner's own POST can't carry back a result the window hasn't produced yet. Delivery is through the **existing** `GET /queue` poll below — unchanged, and already what the web client uses (`packages/web`'s POST-`matched` branch becomes dead tolerance code, since the server can no longer return it, but needs no code changes).
+
+Configurable via two env vars (see Environment variables above): `QUEUE_WINDOW_MS` (default `5000`; the client polls `GET /queue` at 2s, so perceived wait is roughly `window + 2s`) and `QUEUE_MAX_POOL` (default `8`, which also bounds a pass's synchronous CPU burst — `resolveMatch` runs a full headless sim per pairing, so K/2 back-to-back resolves at most). A lone waiter gets `202 { status: 'waiting' }` immediately (that *is* "told none is available yet"), can `DELETE /queue`, and is guaranteed to pair within `QUEUE_WINDOW_MS` of a second player joining (or instantly once the pool reaches K). There is no forced queue timeout/expiry in this slice.
+
+Pairing selection ships **nearest-rating** (the selector is unchanged from #57); a hard rating-band cap with an expansion policy (e.g. widen the band the longer someone waits) would additionally guard against pairing wildly mismatched ratings when the pool is thin, but is future work, not implemented here.
 
 `GET /queue` is a side-effect-free status read: `200 { status: 'matched', matchId, result }` (a delivered result is *retained*, not cleared, until the next `POST` — so a dropped response can't strand a completed match), `200 { status: 'waiting' }`, or `200 { status: 'idle' }`.
 
 `DELETE /queue` leaves the queue: `204` if waiting, `404 { error: 'Not queued' }` if idle or already matched, `409 { error: 'Match currently resolving' }` if a pairing is actively resolving.
 
-`POST` and `DELETE` require a valid CSRF token like the other mutating routes above; `POST` is additionally rate-limited (30/minute) since each pairing runs a full headless sim synchronously. `POST`/`GET`/`DELETE` all 401 without a session.
+`POST` and `DELETE` require a valid CSRF token like the other mutating routes above; `POST` is additionally rate-limited (30/minute) — a pairing pass can run several sim resolutions back-to-back (see above), so the limit still guards against enqueue-spam even though POST itself no longer runs a resolution synchronously. `POST`/`GET`/`DELETE` all 401 without a session.
 
-The queue itself (`src/queue/service.ts`) is in-memory and single-process, instantiated fresh per `buildApp()` call — restart loses all waiting/unclaimed state. This is intentional (see the #57 sub-plan): queue entries are ephemeral intent, and every reproducibility guarantee lives in the persisted `matches` rows written by `resolveMatch`, not in the queue. A shared (e.g. Redis-backed) queue store, needed for a multi-instance deployment, is a later concern. `resolveMatch` is called inline, never through `runMatch` directly — the queue route never re-implements match resolution.
+The queue's own clock/timer seam (`src/queue/service.ts`'s `Scheduler` interface) is injectable — production uses real `setTimeout`/`Date.now`; tests inject a manual scheduler with an explicit `fire()` rather than Vitest's `vi.useFakeTimers()`, which would globally stub `setTimeout` under `pg`'s own internal connection timers.
+
+The queue itself (`src/queue/service.ts`) is in-memory and single-process, instantiated fresh per `buildApp()` call — restart loses all waiting/unclaimed state. This is intentional (see the #57 sub-plan): queue entries are ephemeral intent, and every reproducibility guarantee lives in the persisted `matches` rows written by `resolveMatch`, not in the queue. A shared (e.g. Redis-backed) queue store, needed for a multi-instance deployment, is a later concern. `resolveMatch` is called by a resolver callback injected into the queue (constructed in `queue/routes.ts`, wired to `queueRoutes`' own `db`/logger), never through `runMatch` directly — the queue route never re-implements match resolution.
 
 ## Tests
 
