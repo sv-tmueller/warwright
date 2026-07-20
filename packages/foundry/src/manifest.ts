@@ -1,5 +1,12 @@
 import { z } from 'zod';
-import { BehaviorIdSchema, UnitBuildSchema, behaviorIds } from '@warwright/core';
+import {
+  BehaviorIdSchema,
+  EXTERNAL_BEHAVIOR_ID,
+  UnitBuildSchema,
+  behaviorIds,
+  roles,
+  skills,
+} from '@warwright/core';
 
 // The submission's own id (a new Behavior id, not yet registered anywhere)
 // is going to be resolved as a `behaviorId` inside the real core loop (see
@@ -8,6 +15,13 @@ import { BehaviorIdSchema, UnitBuildSchema, behaviorIds } from '@warwright/core'
 // layer down (ContentRegistry.registerBehavior), but rejecting it here, at
 // manifest-parse time, gives a much earlier and clearer stage-1 error.
 const SEED_BEHAVIOR_IDS: readonly string[] = behaviorIds;
+
+// Content-id lookups, used to validate a submission's build/baseline against
+// core's actual public content instead of deferring to a deep, confusing
+// failure inside the core loop (see Fix 1, review of PR #136).
+const KNOWN_ROLE_IDS: ReadonlySet<string> = new Set(roles.map((role) => role.id));
+const KNOWN_SKILL_IDS: ReadonlySet<string> = new Set(skills.map((skill) => skill.id));
+const KNOWN_BASELINE_IDS: ReadonlySet<string> = new Set(behaviorIds);
 
 export const SHAPE_KINDS = ['general', '1v1'] as const;
 export type ShapeKind = (typeof SHAPE_KINDS)[number];
@@ -31,13 +45,18 @@ export type SubmissionManifest = z.infer<typeof SubmissionManifestSchema>;
 
 /**
  * Stage 1 of the foundry gate: parse+validate a submission's manifest.json
- * against the schema, then check the two structural rules a Zod schema
- * alone cannot express: the manifest's `id` must equal the submission's
- * directory name (`dirName`), and it must not collide with an
- * already-registered seed Behavior id. Throws loud (with the stage
- * identified in the message) on any failure; never touches the filesystem
- * or imports the submission's entry module (that is load.ts's job, and only
- * after stage 2's static scan passes).
+ * against the schema, then check the structural rules a Zod schema alone
+ * cannot express: the manifest's `id` must equal the submission's directory
+ * name (`dirName`); it must not collide with an already-registered seed
+ * Behavior id, nor with the reserved `EXTERNAL_BEHAVIOR_ID` sentinel; its
+ * `entry` must be a `.ts` file (see purity.ts's static scan, which only
+ * walks `.ts` files -- anything else would be imported and executed
+ * unscanned); and its `build.roleId`, `build.skillIds`, and `baseline` must
+ * resolve against core's actual public content (roles/skills/behaviorIds),
+ * so an unknown id fails loud here instead of deep inside the core loop.
+ * Throws loud (with the stage identified in the message) on any failure;
+ * never touches the filesystem or imports the submission's entry module
+ * (that is load.ts's job, and only after stage 2's static scan passes).
  */
 export function parseSubmissionManifest(dirName: string, data: unknown): SubmissionManifest {
   const result = SubmissionManifestSchema.safeParse(data);
@@ -53,9 +72,47 @@ export function parseSubmissionManifest(dirName: string, data: unknown): Submiss
     );
   }
 
+  if (manifest.id === EXTERNAL_BEHAVIOR_ID) {
+    throw new Error(
+      `Stage 1 (manifest): id "${manifest.id}" is the reserved external-behavior sentinel (EXTERNAL_BEHAVIOR_ID) and cannot be used as a submission id`,
+    );
+  }
+
   if (SEED_BEHAVIOR_IDS.includes(manifest.id)) {
     throw new Error(
       `Stage 1 (manifest): id "${manifest.id}" collides with an already-registered seed Behavior id (${SEED_BEHAVIOR_IDS.join(', ')})`,
+    );
+  }
+
+  if (!manifest.entry.endsWith('.ts')) {
+    throw new Error(
+      `Stage 1 (manifest): entry "${manifest.entry}" must end in .ts (stage 2's static scan only walks .ts files)`,
+    );
+  }
+
+  if (!KNOWN_ROLE_IDS.has(manifest.build.roleId)) {
+    throw new Error(
+      `Stage 1 (manifest): build.roleId "${manifest.build.roleId}" is not a known core role`,
+    );
+  }
+
+  for (const skillId of manifest.build.skillIds) {
+    if (!KNOWN_SKILL_IDS.has(skillId)) {
+      throw new Error(
+        `Stage 1 (manifest): build.skillIds contains unknown skill "${skillId}"`,
+      );
+    }
+  }
+
+  if (manifest.baseline === EXTERNAL_BEHAVIOR_ID) {
+    throw new Error(
+      `Stage 1 (manifest): baseline "${manifest.baseline}" is the reserved external-behavior sentinel (EXTERNAL_BEHAVIOR_ID) and cannot be used as a baseline`,
+    );
+  }
+
+  if (!KNOWN_BASELINE_IDS.has(manifest.baseline)) {
+    throw new Error(
+      `Stage 1 (manifest): baseline "${manifest.baseline}" is not a known core Behavior id (${SEED_BEHAVIOR_IDS.join(', ')})`,
     );
   }
 

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { EXTERNAL_BEHAVIOR_ID } from '@warwright/core';
 import { parseSubmissionManifest } from './manifest.js';
 
 const validManifest = {
@@ -48,5 +49,50 @@ describe('parseSubmissionManifest (stage 1)', () => {
     expect(() => parseSubmissionManifest('aggro-lowest-hp', colliding)).toThrow(
       /seed Behavior id/i,
     );
+  });
+
+  it('rejects a manifest whose build.roleId is not a core role', () => {
+    const bad = { ...validManifest, build: { ...validManifest.build, roleId: 'not-a-role' } };
+
+    expect(() => parseSubmissionManifest('sample-aggro', bad)).toThrow(/stage 1/i);
+    expect(() => parseSubmissionManifest('sample-aggro', bad)).toThrow(/roleId/i);
+  });
+
+  it('rejects a manifest whose build.skillIds contains an unknown skill', () => {
+    const bad = {
+      ...validManifest,
+      build: { ...validManifest.build, skillIds: ['cleave', 'not-a-skill'] },
+    };
+
+    expect(() => parseSubmissionManifest('sample-aggro', bad)).toThrow(/stage 1/i);
+    expect(() => parseSubmissionManifest('sample-aggro', bad)).toThrow(/skillIds/i);
+  });
+
+  it('rejects a manifest whose baseline is not a registered core Behavior', () => {
+    const bad = { ...validManifest, baseline: 'not-a-behavior' };
+
+    expect(() => parseSubmissionManifest('sample-aggro', bad)).toThrow(/stage 1/i);
+    expect(() => parseSubmissionManifest('sample-aggro', bad)).toThrow(/baseline/i);
+  });
+
+  it('rejects a manifest whose id is the reserved external-behavior sentinel', () => {
+    const bad = { ...validManifest, id: EXTERNAL_BEHAVIOR_ID };
+
+    expect(() => parseSubmissionManifest(EXTERNAL_BEHAVIOR_ID, bad)).toThrow(/stage 1/i);
+    expect(() => parseSubmissionManifest(EXTERNAL_BEHAVIOR_ID, bad)).toThrow(/external/i);
+  });
+
+  it('rejects a manifest whose baseline is the reserved external-behavior sentinel', () => {
+    const bad = { ...validManifest, baseline: EXTERNAL_BEHAVIOR_ID };
+
+    expect(() => parseSubmissionManifest('sample-aggro', bad)).toThrow(/stage 1/i);
+    expect(() => parseSubmissionManifest('sample-aggro', bad)).toThrow(/external/i);
+  });
+
+  it('rejects a manifest whose entry does not end in .ts', () => {
+    const bad = { ...validManifest, entry: 'behavior.js' };
+
+    expect(() => parseSubmissionManifest('sample-aggro', bad)).toThrow(/stage 1/i);
+    expect(() => parseSubmissionManifest('sample-aggro', bad)).toThrow(/\.ts/i);
   });
 });
