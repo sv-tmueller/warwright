@@ -339,7 +339,14 @@ export class QueueService {
     if (this.waiting.size < 2) return;
     this.timerHandle = this.scheduler.schedule(() => {
       this.timerHandle = undefined;
-      this.pendingPassPromise = this.runPass();
+      const promise = this.runPass();
+      this.pendingPassPromise = promise;
+      // The Scheduler interface types this callback as `() => void` (a
+      // real setTimeout callback's return value is ignored), but returning
+      // the pass's promise anyway is what lets createManualScheduler's
+      // fire() hand it back to a caller (see ManualScheduler.fire's doc
+      // comment) — TypeScript's void-return leniency allows this.
+      return promise;
     }, this.windowMs);
   }
 

@@ -10,7 +10,7 @@ import authRoutes from './auth/routes.js';
 import type { Database } from './db/client.js';
 import matchRoutes from './matches/routes.js';
 import sessionPlugin from './plugins/session.js';
-import queueRoutes from './queue/routes.js';
+import queueRoutes, { type QueueConfig } from './queue/routes.js';
 import ratingRoutes from './ratings/routes.js';
 import warbandRoutes from './warbands/routes.js';
 
@@ -32,6 +32,8 @@ export interface BuildAppOptions {
   pool?: Pool;
   /** Optional session/CSRF config; the session plugin and auth routes are only registered when db, pool, and session are all supplied. */
   session?: SessionConfig;
+  /** Optional matchmaking-queue batching config (window/K/scheduler); see queue/routes.ts's QueueConfig. Omitted fields fall back to createQueueService's own defaults. */
+  queue?: QueueConfig;
 }
 
 /**
@@ -71,7 +73,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     });
     void app.register(authRoutes, { db });
     void app.register(warbandRoutes, { db });
-    void app.register(queueRoutes, { db });
+    void app.register(queueRoutes, { db, queue: options.queue });
     void app.register(ratingRoutes, { db });
     void app.register(matchRoutes, { db });
   }

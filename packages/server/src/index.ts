@@ -8,6 +8,7 @@ const app = buildApp({
   db,
   pool,
   session: { secret: config.sessionSecret, cookieSecure: config.cookieSecure },
+  queue: { windowMs: config.queueWindowMs, maxPool: config.queueMaxPool },
 });
 
 app

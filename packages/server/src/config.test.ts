@@ -18,6 +18,8 @@ describe('loadConfig', () => {
       host: '127.0.0.1',
       sessionSecret: SESSION_SECRET,
       cookieSecure: false,
+      queueWindowMs: 5000,
+      queueMaxPool: 8,
     });
   });
 
@@ -94,6 +96,53 @@ describe('loadConfig', () => {
       loadConfig({
         DATABASE_URL: 'postgresql://user:pass@localhost:5432/warwright',
         SESSION_SECRET: 'too-short',
+      })
+    ).toThrow();
+  });
+
+  it('defaults QUEUE_WINDOW_MS to 5000 and QUEUE_MAX_POOL to 8', () => {
+    const config = loadConfig({
+      DATABASE_URL: 'postgresql://user:pass@localhost:5432/warwright',
+      SESSION_SECRET,
+    });
+    expect(config.queueWindowMs).toBe(5000);
+    expect(config.queueMaxPool).toBe(8);
+  });
+
+  it('parses explicit QUEUE_WINDOW_MS and QUEUE_MAX_POOL', () => {
+    const config = loadConfig({
+      DATABASE_URL: 'postgresql://user:pass@localhost:5432/warwright',
+      SESSION_SECRET,
+      QUEUE_WINDOW_MS: '2500',
+      QUEUE_MAX_POOL: '4',
+    });
+    expect(config.queueWindowMs).toBe(2500);
+    expect(config.queueMaxPool).toBe(4);
+  });
+
+  it('throws loudly when QUEUE_WINDOW_MS is not a positive integer', () => {
+    expect(() =>
+      loadConfig({
+        DATABASE_URL: 'postgresql://user:pass@localhost:5432/warwright',
+        SESSION_SECRET,
+        QUEUE_WINDOW_MS: '0',
+      })
+    ).toThrow();
+    expect(() =>
+      loadConfig({
+        DATABASE_URL: 'postgresql://user:pass@localhost:5432/warwright',
+        SESSION_SECRET,
+        QUEUE_WINDOW_MS: 'not-a-number',
+      })
+    ).toThrow();
+  });
+
+  it('throws loudly when QUEUE_MAX_POOL is below 2 (K must allow at least one pairing)', () => {
+    expect(() =>
+      loadConfig({
+        DATABASE_URL: 'postgresql://user:pass@localhost:5432/warwright',
+        SESSION_SECRET,
+        QUEUE_MAX_POOL: '1',
       })
     ).toThrow();
   });
