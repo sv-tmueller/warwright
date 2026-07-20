@@ -60,6 +60,12 @@ beforeEach(() => {
   // needs this set explicitly; without it, `act()` warns and batches
   // nothing.
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  // These are `vi.fn()`s from a `vi.mock()` factory, not `vi.spyOn()`
+  // spies, so `afterEach`'s `vi.restoreAllMocks()` (a no-op restore-original
+  // for non-spies) does not clear their call counts between tests; clear
+  // explicitly so each test's `toHaveBeenCalledTimes` assertions start from
+  // zero.
+  vi.clearAllMocks();
   // Default fake-timer config: only timers are faked, microtasks (the
   // mocked api-client promises) stay real, so `await act(async () => {})`
   // alone flushes them.
@@ -124,6 +130,40 @@ describe('OnlineMode polling cancellation (pins the PR #115 timer-leak fix)', ()
     const { renderResult, pollDeferred } = await armInFlightPoll();
 
     renderResult.unmount();
+
+    pollDeferred.resolve(ok<QueueStatus>({ status: 'waiting' }));
+    await act(async () => {});
+
+    expect(queueStatus).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+
+    await act(() => vi.advanceTimersByTimeAsync(4000));
+    expect(queueStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it('clicking Leave queue while a poll is in flight issues no further GET /queue calls once it resolves', async () => {
+    const { pollDeferred } = await armInFlightPoll();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Leave queue' }));
+    // Flushes handleLeave's `await leaveQueue()`.
+    await act(async () => {});
+
+    pollDeferred.resolve(ok<QueueStatus>({ status: 'waiting' }));
+    await act(async () => {});
+
+    expect(queueStatus).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+
+    await act(() => vi.advanceTimersByTimeAsync(4000));
+    expect(queueStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it('clicking Log out while a poll is in flight issues no further GET /queue calls once it resolves', async () => {
+    const { pollDeferred } = await armInFlightPoll();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Log out' }));
+    // Flushes handleLogout's `await logout()`.
+    await act(async () => {});
 
     pollDeferred.resolve(ok<QueueStatus>({ status: 'waiting' }));
     await act(async () => {});
