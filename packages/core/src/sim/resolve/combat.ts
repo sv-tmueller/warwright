@@ -75,7 +75,11 @@ export function resolveAttack(
   if (!isInRange(attacker.pos, target.pos, attacker.attackRangeSquared)) return false;
 
   emit(log, { kind: 'attack', tick, unitId: attacker.id, targetId: target.id });
-  dealDamage(target, attacker.attackDamage, attacker.id, log, tick);
+  const damage =
+    attacker.empower === null
+      ? attacker.attackDamage
+      : Math.trunc((attacker.attackDamage * (100 + attacker.empower.magnitude)) / 100);
+  dealDamage(target, damage, attacker.id, log, tick);
   attacker.attackCooldownRemaining = attacker.attackCooldownTicks;
 
   return true;

@@ -28,6 +28,8 @@ function makeUnit(overrides: Partial<Unit> = {}): Unit {
     skills: [],
     slow: null,
     shield: null,
+    stun: null,
+    empower: null,
     activeDots: [],
     ...overrides,
   };
@@ -243,6 +245,28 @@ describe('resolveAttack', () => {
     expect(result).toBe(false);
     expect(log).toEqual([]);
     expect(target.hp).toBe(50);
+  });
+
+  it('boosts basic-attack damage with trunc integer division when the attacker is empowered', () => {
+    const attacker = makeUnit({
+      id: 1,
+      pos: { x: 0, y: 0 },
+      attackDamage: 10,
+      attackRangeSquared: 100,
+      attackCooldownTicks: 5,
+      empower: { magnitude: 25, remainingTicks: 40 },
+    });
+    const target = makeUnit({ id: 2, pos: { x: 5, y: 0 }, hp: 50, armor: 0 });
+    const log: MatchEvent[] = [];
+
+    resolveAttack(attacker, target, log, 2);
+
+    // trunc(10 * 125 / 100) = trunc(12.5) = 12
+    expect(target.hp).toBe(38);
+    expect(log).toEqual([
+      { kind: 'attack', tick: 2, unitId: 1, targetId: 2 },
+      { kind: 'damage', tick: 2, sourceId: 1, targetId: 2, amount: 12, absorbed: 0, hpAfter: 38 },
+    ]);
   });
 });
 

@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { EFFECT_KINDS, STATUS_KINDS } from '../sim/vocab.js';
 import type { EffectKind, StatusKind } from '../sim/vocab.js';
 import {
+  AugmentSchema,
   RoleSchema,
   SkillSchema,
+  UnitBuildSchema,
   WarbandSchema,
+  parseAugment,
   parseRole,
   parseSkill,
   parseWarband,
@@ -178,5 +181,91 @@ describe('parseWarband', () => {
   it('returns a parsed Warband for valid data', () => {
     const parsed = parseWarband(validWarband);
     expect(parsed.name).toBe('Alpha Squad');
+  });
+});
+
+const validAugment = {
+  id: 'iron-plating',
+  name: 'Iron Plating',
+  armorDelta: 5,
+};
+
+describe('AugmentSchema', () => {
+  it('parses a valid Augment with only armorDelta set', () => {
+    const parsed = AugmentSchema.parse(validAugment);
+    expect(parsed).toEqual(validAugment);
+  });
+
+  it('parses a valid Augment with all three deltas, including negative values', () => {
+    const augment = {
+      id: 'lopsided',
+      name: 'Lopsided',
+      maxHpDelta: -10,
+      armorDelta: 2,
+      moveSpeedDelta: -1,
+    };
+    expect(() => AugmentSchema.parse(augment)).not.toThrow();
+  });
+
+  it('parses a valid Augment with no deltas set at all', () => {
+    const augment = { id: 'no-op', name: 'No-op' };
+    expect(() => AugmentSchema.parse(augment)).not.toThrow();
+  });
+
+  it('rejects an unknown extra key (strict object)', () => {
+    const withExtra = { ...validAugment, unknownField: 'nope' };
+    expect(() => AugmentSchema.parse(withExtra)).toThrow();
+  });
+
+  it('rejects a non-integer delta', () => {
+    const invalid = { ...validAugment, armorDelta: 5.5 };
+    expect(() => AugmentSchema.parse(invalid)).toThrow();
+  });
+
+  it('rejects a missing id', () => {
+    const withoutId: Record<string, unknown> = { ...validAugment };
+    delete withoutId.id;
+    expect(() => AugmentSchema.parse(withoutId)).toThrow();
+  });
+
+  it('rejects a missing name', () => {
+    const withoutName: Record<string, unknown> = { ...validAugment };
+    delete withoutName.name;
+    expect(() => AugmentSchema.parse(withoutName)).toThrow();
+  });
+});
+
+describe('parseAugment', () => {
+  it('returns a parsed Augment for valid data', () => {
+    expect(parseAugment(validAugment)).toEqual(validAugment);
+  });
+
+  it('throws a descriptive error naming the schema for invalid data', () => {
+    expect(() => parseAugment({ ...validAugment, extra: true })).toThrow(/Augment/);
+  });
+});
+
+describe('UnitBuildSchema augmentIds', () => {
+  it('defaults augmentIds to an empty array when absent', () => {
+    const parsed = UnitBuildSchema.parse(validUnitBuild);
+    expect(parsed.augmentIds).toEqual([]);
+  });
+
+  it('accepts an explicit list of augment ids', () => {
+    const withAugments = { ...validUnitBuild, augmentIds: ['iron-plating'] };
+    const parsed = UnitBuildSchema.parse(withAugments);
+    expect(parsed.augmentIds).toEqual(['iron-plating']);
+  });
+
+  it('rejects a non-string augment id', () => {
+    const invalid = { ...validUnitBuild, augmentIds: [42] };
+    expect(() => UnitBuildSchema.parse(invalid)).toThrow();
+  });
+
+  it('round-trips through parse-of-parsed unchanged', () => {
+    const withAugments = { ...validUnitBuild, augmentIds: ['iron-plating', 'iron-plating'] };
+    const once = UnitBuildSchema.parse(withAugments);
+    const twice = UnitBuildSchema.parse(once);
+    expect(twice).toEqual(once);
   });
 });

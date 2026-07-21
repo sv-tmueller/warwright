@@ -3,9 +3,10 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { EFFECT_KINDS, STATUS_KINDS } from '../sim/vocab.js';
 import { runMatch } from '../sim/match.js';
-import { parseRole, parseSkill, parseWarband } from './schemas.js';
+import { parseAugment, parseRole, parseSkill, parseWarband } from './schemas.js';
 import { roles } from './data/roles.js';
 import { skills } from './data/skills.js';
+import { augments } from './data/augments.js';
 
 // content/ -> src/ -> core/ -> packages/ -> repo root = four `../`.
 const readWarband = (name: string) =>
@@ -78,14 +79,32 @@ describe('seed skills', () => {
     }
   });
 
-  it('covers every status kind', () => {
+  it('covers every status kind that has seed-skill content', () => {
+    // 'stun' and 'empower' are engine primitives added in Slice A (#147);
+    // no seed Skill uses them yet -- their content (Crippling Strike/Rally)
+    // lands in Slice C (#149)/Slice D (#150).
     const statuses = new Set(
       skills
         .filter((s) => s.effect.kind === 'apply-status')
         .map((s) => (s.effect as { status: (typeof STATUS_KINDS)[number] }).status),
     );
-    for (const status of STATUS_KINDS) {
+    const contentCoveredStatusKinds = STATUS_KINDS.filter(
+      (status) => status !== 'stun' && status !== 'empower',
+    );
+    for (const status of contentCoveredStatusKinds) {
       expect(statuses.has(status)).toBe(true);
+    }
+  });
+});
+
+describe('seed augments', () => {
+  it('has no augment instances yet (they land in Slice D/#150)', () => {
+    expect(augments.length).toBe(0);
+  });
+
+  it('parses every augment', () => {
+    for (const augment of augments) {
+      expect(() => parseAugment(augment)).not.toThrow();
     }
   });
 });

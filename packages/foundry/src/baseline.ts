@@ -72,12 +72,14 @@ export function baselineWarbandFor(manifest: SubmissionManifest): Warband {
         skillIds: [],
         behaviorId: GATE_GENERAL_BASELINE_BEHAVIOR_ID,
         position: { x: 500, y: 470 },
+        augmentIds: [],
       },
       {
         roleId: 'mender',
         skillIds: [],
         behaviorId: GATE_GENERAL_BASELINE_BEHAVIOR_ID,
         position: { x: 500, y: 530 },
+        augmentIds: [],
       },
     ],
   };

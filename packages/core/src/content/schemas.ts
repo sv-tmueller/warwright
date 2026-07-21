@@ -11,6 +11,7 @@ export type TargetKind = (typeof TARGET_KINDS)[number];
 export const RoleIdSchema = z.string().min(1);
 export const SkillIdSchema = z.string().min(1);
 export const BehaviorIdSchema = z.string().min(1);
+export const AugmentIdSchema = z.string().min(1);
 
 export const PositionSchema = z.strictObject({
   x: z.int().min(ARENA_MIN_X).max(ARENA_MAX_X),
@@ -59,11 +60,28 @@ export const SkillSchema = z.strictObject({
   effect: SkillEffectSchema,
 });
 
+// Init-time-only stat deltas applied additively over a unit's Role-derived
+// stats (see sim/init.ts buildUnit); never a per-tick effect. All three
+// deltas are optional and may be negative; a delta absent from an Augment
+// simply contributes 0.
+export const AugmentSchema = z.strictObject({
+  id: AugmentIdSchema,
+  name: z.string().min(1),
+  maxHpDelta: z.int().optional(),
+  armorDelta: z.int().optional(),
+  moveSpeedDelta: z.int().optional(),
+});
+
 export const UnitBuildSchema = z.strictObject({
   roleId: RoleIdSchema,
   skillIds: z.array(SkillIdSchema),
   behaviorId: BehaviorIdSchema,
   position: PositionSchema,
+  // Input-optional/output-present so existing builds (and the replay/parity
+  // round-trip) keep validating under strictObject with no augments.
+  // Duplicate ids are allowed and stack additively (mirrors skillIds'
+  // no-uniqueness precedent).
+  augmentIds: z.array(AugmentIdSchema).default([]),
 });
 
 export const WarbandSchema = z.strictObject({
@@ -74,6 +92,7 @@ export const WarbandSchema = z.strictObject({
 export type Role = z.infer<typeof RoleSchema>;
 export type Skill = z.infer<typeof SkillSchema>;
 export type SkillEffect = z.infer<typeof SkillEffectSchema>;
+export type Augment = z.infer<typeof AugmentSchema>;
 export type UnitBuild = z.infer<typeof UnitBuildSchema>;
 export type Warband = z.infer<typeof WarbandSchema>;
 
@@ -91,6 +110,10 @@ export function parseRole(data: unknown): Role {
 
 export function parseSkill(data: unknown): Skill {
   return parseWith(SkillSchema, 'Skill', data);
+}
+
+export function parseAugment(data: unknown): Augment {
+  return parseWith(AugmentSchema, 'Augment', data);
 }
 
 export function parseWarband(data: unknown): Warband {
