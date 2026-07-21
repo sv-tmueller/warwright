@@ -12,18 +12,24 @@
  * representable slot in the sim-input type AND no read on the resolve path.
  *
  * Four assertions prove this:
- *   1. (PRIMARY, type boundary) The strictObject key sets of UnitBuildSchema
- *      and WarbandSchema are exactly the documented sim-input keys, and
- *      parseWarband throws the instant a cosmetic-shaped key is injected —
- *      at the Warband level and inside a UnitBuild — for every cosmetic slot
- *      name plus a representative cosmeticId. This is tied to the
- *      strictObject boundary guarding the only door into runMatch, not a
- *      "we didn't wire it up" test: it fails loudly the moment a future
- *      change adds a cosmetic-shaped key to a sim-input schema.
+ *   1. (PRIMARY, type boundary) None of the cosmetic-shaped keys (cosmetic
+ *      slot names, or catalog field names like cosmeticId/slot/descriptor/
+ *      defaultOwned) is a key of UnitBuildSchema.shape or WarbandSchema.shape
+ *      — the sim-input keyspace contains no cosmetic-shaped key, though it
+ *      legitimately contains other non-cosmetic sim inputs (e.g. augmentIds,
+ *      added by #157/Phase 4 Slice A). parseWarband also throws the instant
+ *      a cosmetic-shaped key is injected — at the Warband level and inside a
+ *      UnitBuild — for every cosmetic slot name plus catalog field name plus
+ *      a representative cosmeticId. This is tied to the strictObject
+ *      boundary guarding the only door into runMatch, not a "we didn't wire
+ *      it up" test: it fails loudly the moment a future change adds a
+ *      cosmetic-shaped key to a sim-input schema.
  *   2. (resolve-path namespace) ResolveMatchInput has no cosmetic field at
- *      compile time (a type-level assertion enforced by `pnpm typecheck`),
- *      and at runtime a persisted matches.buildA/buildB deep-equals
- *      parseWarband's output and contains no cosmetic keys.
+ *      compile time — neither a literal cosmeticId field nor any of the
+ *      cosmetic slot names (unitPalette/banner) — (a type-level assertion
+ *      enforced by `pnpm typecheck`), and at runtime a persisted
+ *      matches.buildA/buildB deep-equals parseWarband's output and contains
+ *      no cosmetic keys.
  *   3. (behavioral resolve-invariance, the acceptance test) A fixed
  *      {seed, buildA, buildB} resolves to an identical winner + hash +
  *      event-log hash regardless of cosmetic state — proven both DB-free
@@ -62,22 +68,66 @@ function loadBuild(name: string): Record<string, unknown> {
 const warbandA = loadBuild('warband-a.json');
 const warbandB = loadBuild('warband-b.json');
 
-// Every cosmetic slot name, plus a generic "cosmeticId"-style key, each
-// paired with a representative cosmeticId value: exactly what a
+// Every cosmetic slot name, plus every cosmetic-shaped field name (the
+// catalog's own field names, and the generic "cosmeticId" a route body
+// uses), each paired with a representative cosmeticId value: exactly what a
 // (hypothetical, wrong) implementation would inject if it tried to smuggle
 // cosmetic state through the sim-input path.
-const COSMETIC_INJECTION_KEYS = [...CosmeticSlotSchema.options, 'cosmeticId'];
+const COSMETIC_INJECTION_KEYS = [
+  ...CosmeticSlotSchema.options,
+  'cosmeticId',
+  'slot',
+  'descriptor',
+  'defaultOwned',
+];
 const REPRESENTATIVE_COSMETIC_ID = 'palette-crimson';
 
+// The known, legitimate sim-input keys as of this ruleset version. Used only
+// as an optional, secondary "closed keyspace" guard below — it is NOT the
+// primary invariant (see the no-cosmetic-key assertions), because this list
+// legitimately grows over time (e.g. augmentIds, added by #157/Phase 4 Slice
+// A) whereas the cosmetic-shaped keyspace must never appear here at all.
+const KNOWN_UNIT_BUILD_KEYS = ['roleId', 'skillIds', 'behaviorId', 'position', 'augmentIds'];
+const KNOWN_WARBAND_KEYS = ['name', 'units'];
+
 describe('Assertion 1 (PRIMARY): the sim-input keyspace is closed', () => {
-  it('UnitBuildSchema.shape is exactly {roleId, skillIds, behaviorId, position}', () => {
-    expect(Object.keys(UnitBuildSchema.shape).sort()).toEqual(
-      ['roleId', 'skillIds', 'behaviorId', 'position'].sort()
-    );
+  // augmentIds is a legitimate, non-cosmetic sim input (a real gameplay
+  // mechanic resolved by packages/core/src/sim, added by #157/Phase 4 Slice
+  // A) — it is expected and allowed to be a key of UnitBuildSchema.shape.
+  // Cosmetic-shaped keys (slot names, catalog field names) are categorically
+  // different: they must NEVER appear as a key of a sim-input schema,
+  // because a cosmetic is visual-only and must have zero representable slot
+  // in anything the sim reads. That is the true invariant this test proves
+  // — not "the key set never changes" (over-strict, and now false), but "the
+  // key set never contains a cosmetic-shaped key" (still true, and the only
+  // thing #73's soundness argument actually needs).
+  it('none of the cosmetic-shaped keys is a key of UnitBuildSchema.shape', () => {
+    const shapeKeys = new Set(Object.keys(UnitBuildSchema.shape));
+    for (const cosmeticKey of COSMETIC_INJECTION_KEYS) {
+      expect(shapeKeys.has(cosmeticKey)).toBe(false);
+    }
   });
 
-  it('WarbandSchema.shape is exactly {name, units}', () => {
-    expect(Object.keys(WarbandSchema.shape).sort()).toEqual(['name', 'units'].sort());
+  it('none of the cosmetic-shaped keys is a key of WarbandSchema.shape', () => {
+    const shapeKeys = new Set(Object.keys(WarbandSchema.shape));
+    for (const cosmeticKey of COSMETIC_INJECTION_KEYS) {
+      expect(shapeKeys.has(cosmeticKey)).toBe(false);
+    }
+  });
+
+  // Secondary, optional closed-keyspace guard: catches an unexpected key
+  // (cosmetic-shaped or otherwise) landing on a sim-input schema without
+  // being deliberately added to the known-keys list above.
+  it('UnitBuildSchema.shape keys are a subset of the known sim-input keys', () => {
+    for (const key of Object.keys(UnitBuildSchema.shape)) {
+      expect(KNOWN_UNIT_BUILD_KEYS).toContain(key);
+    }
+  });
+
+  it('WarbandSchema.shape keys are a subset of the known sim-input keys', () => {
+    for (const key of Object.keys(WarbandSchema.shape)) {
+      expect(KNOWN_WARBAND_KEYS).toContain(key);
+    }
   });
 
   it.each(COSMETIC_INJECTION_KEYS)(
@@ -103,12 +153,17 @@ describe('Assertion 1 (PRIMARY): the sim-input keyspace is closed', () => {
 
 describe('Assertion 2: the resolve path has no cosmetic namespace', () => {
   // Compile-time: if ResolveMatchInput ever gains a field literally named
-  // "cosmeticId", 'cosmeticId' becomes assignable to keyof ResolveMatchInput
-  // and this type evaluates to `never`, so assigning `true` below fails to
-  // type-check — caught by `pnpm typecheck`, not by any runtime assertion.
-  type ResolveMatchInputHasNoCosmeticIdField = 'cosmeticId' extends keyof ResolveMatchInput ? never : true;
-  const _noCosmeticIdField: ResolveMatchInputHasNoCosmeticIdField = true;
-  void _noCosmeticIdField;
+  // "cosmeticId" OR named after a cosmetic slot ("unitPalette"/"banner"),
+  // that name becomes a member of the intersection of keyof
+  // ResolveMatchInput with this cosmetic-key union, so the intersection is
+  // no longer `never` and assigning `true` below fails to type-check —
+  // caught by `pnpm typecheck`, not by any runtime assertion. A guard on
+  // 'cosmeticId' alone would miss a slot-named field (e.g. `unitPalette:
+  // string` smuggled onto ResolveMatchInput); this catches both shapes.
+  type CosmeticKey = 'cosmeticId' | 'unitPalette' | 'banner';
+  type ResolveMatchInputHasNoCosmeticKey = keyof ResolveMatchInput & CosmeticKey extends never ? true : never;
+  const _noCosmeticKey: ResolveMatchInputHasNoCosmeticKey = true;
+  void _noCosmeticKey;
 
   it('a well-formed ResolveMatchInput has exactly the documented properties (no cosmetic field)', () => {
     const sample: ResolveMatchInput = {
