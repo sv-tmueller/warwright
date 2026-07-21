@@ -3,12 +3,7 @@ import type { ContentRegistry } from '../content/registry.js';
 import { roles } from '../content/data/roles.js';
 import { skills } from '../content/data/skills.js';
 import { augments } from '../content/data/augments.js';
-import {
-  aggroLowestHp,
-  focusCasters,
-  policySmokeV1,
-  protectAllies,
-} from '../content/behaviors/index.js';
+import { aggroLowestHp, focusCasters, protectAllies } from '../content/behaviors/index.js';
 import type { Behavior } from './behavior.js';
 
 // Shared by init.ts and match.ts so the two can never assemble a different
@@ -29,7 +24,6 @@ export function createSeedRegistryWith(extra: readonly Behavior[]): ContentRegis
   registry.registerBehavior(aggroLowestHp);
   registry.registerBehavior(protectAllies);
   registry.registerBehavior(focusCasters);
-  registry.registerBehavior(policySmokeV1);
   for (const behavior of extra) registry.registerBehavior(behavior);
   return registry;
 }

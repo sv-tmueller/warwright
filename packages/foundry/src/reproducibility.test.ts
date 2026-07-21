@@ -9,24 +9,13 @@ const SUBMISSIONS_DIR = fileURLToPath(new URL('../submissions/', import.meta.url
 // Mirrors golden-replay's second assertion (see CLAUDE.md's determinism
 // contract): the SAME seed set against the SAME baseline roster must
 // produce byte-identical results every time. Runs the gauntlet end to end
-// TWICE, from a freshly loaded submission each time, for both a
-// rule-based ('general' shape) and an exported-policy ('1v1' shape)
-// submission, so this catches a shape-specific regression either kind of
+// TWICE, from a freshly loaded submission each time, for the committed
+// rule-based ('general' shape) sample, so this catches a regression a
 // submission could introduce.
 //
 // sample-aggro runs the full, default GAUNTLET_SEEDS (cheap: rule-based
-// Behaviors have no per-tick inference cost). sample-policy instead uses a
-// small, explicit seed set: this test is proving determinism (byte-
-// identical hashes across two independent runs), a property a handful of
-// seeds demonstrates just as well as all 25 -- the full 25-seed bar itself
-// is proven once, at full N, by validate.test.ts's sample-policy case (see
-// its comment). Running the 25-seed gauntlet twice for sample-policy (50
-// rounds of policy-smoke-v1 MLP inference) would be redundant CPU cost
-// across the suite for no extra coverage.
-const REPRODUCIBILITY_CASES = [
-  { submissionId: 'sample-aggro', seeds: undefined },
-  { submissionId: 'sample-policy', seeds: [1, 2, 3, 4, 5] },
-] as const;
+// Behaviors have no per-tick inference cost).
+const REPRODUCIBILITY_CASES = [{ submissionId: 'sample-aggro', seeds: undefined }] as const;
 
 describe('foundry gauntlet reproducibility', () => {
   it.each(REPRODUCIBILITY_CASES)(

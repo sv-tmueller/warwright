@@ -53,25 +53,6 @@ describe('runStage3', () => {
     expect(result.winRate).toBeGreaterThanOrEqual(BASELINE_WIN_RATE_THRESHOLD);
   });
 
-  // Small, explicit seed set: this test is exercising runStage3's own
-  // pass/threshold wiring for the exported-policy path, not re-proving the
-  // full 25-seed bar (validate.test.ts's sample-policy case is the ONE
-  // test that runs sample-policy through the real, full GAUNTLET_SEEDS --
-  // see its comment). Each seed still runs policy-smoke-v1's full MLP
-  // inference every tick, so keeping this small avoids paying that cost
-  // redundantly across the suite.
-  it('clears the bar for submissions/sample-policy (exported policy, 1v1 shape)', async () => {
-    const { manifest: loadedManifest, behavior } = await loadSubmission(
-      path.join(SUBMISSIONS_DIR, 'sample-policy'),
-    );
-
-    const result = runStage3(loadedManifest, behavior, [1, 2, 3, 4, 5]);
-
-    expect(result.status).toBe('pass');
-    expect(result.total).toBe(5);
-    expect(result.winRate).toBeGreaterThanOrEqual(BASELINE_WIN_RATE_THRESHOLD);
-  });
-
   it('rejects fixtures/weak-idle at stage 3: win rate ~0, below the bar', async () => {
     const { manifest: loadedManifest, behavior } = await loadSubmission(
       path.join(FIXTURES_DIR, 'weak-idle'),

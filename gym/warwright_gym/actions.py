@@ -28,7 +28,7 @@ from typing import Any
 # parity ground truth for the wire protocol. gym/tests/test_protocol_golden.py
 # cross-checks this against the TS-generated fixture's `obsEncodingVersion`
 # so a version bump on either side without the other is caught mechanically.
-OBS_ENCODING_VERSION = 1
+OBS_ENCODING_VERSION = 2
 
 ACTION_KIND_IDLE = 0
 ACTION_KIND_MOVE = 1
@@ -47,6 +47,10 @@ SKILL_CATALOG = [
     "frost-bolt",
     "venom-shot",
     "mending-touch",
+    "piercing-shot",
+    "battle-cry",
+    "crippling-strike",
+    "rally",
 ]
 
 

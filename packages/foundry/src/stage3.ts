@@ -6,9 +6,11 @@ import type { SubmissionManifest } from './manifest.js';
 // Calibrated from MEASURED win rates (see the #67b PR report / this file's
 // own git history for the exact run this constant was set from), running
 // the full 25-seed gauntlet (see gauntlet.ts's GAUNTLET_SEEDS) for every
-// committed sample and fixture:
+// sample and fixture committed at calibration time:
 //   sample-aggro  (general, 2x mender/aggro-lowest-hp baseline): 25/25 = 1.0
 //   sample-policy (1v1, policy-1v1-b/warden/aggro-lowest-hp):    25/25 = 1.0
+//     (an exported-policy '1v1' sample; retired in #149 -- see that issue
+//     for why -- but its measured rate is unchanged history, kept here.)
 //   weak-idle     (general, 2x mender/aggro-lowest-hp baseline):  0/25 = 0.0
 // Both valid samples clear a perfect win rate; the invalid weak-idle
 // fixture (never attacks, stalls every match to the tick cap -- a 'draw',

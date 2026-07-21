@@ -77,21 +77,22 @@ describe('runGauntlet', () => {
       author: 'foundry-fixtures',
       entry: 'behavior.ts',
       build: { roleId: 'reaver', skillIds: ['cleave'], position: { x: 0, y: 0 } },
-      // Deliberately wrong: policy-smoke-v1 was trained on a 0-ally/1-enemy
-      // roster (the '1v1' baseline), not the two-enemy 'general' baseline.
+      // Deliberately wrong: an exported-policy Behavior is trained on a
+      // fixed 0-ally/1-enemy roster (the '1v1' baseline), not the
+      // two-enemy 'general' baseline.
       shape: 'general',
     });
 
-    // A stand-in policy-shaped Behavior: throws exactly like
-    // policy-smoke-v1.ts does on an observation-length mismatch, without
-    // depending on the real trained weights.
+    // A stand-in policy-shaped Behavior: throws exactly like a real
+    // exported-policy Behavior would on an observation-length mismatch,
+    // without depending on any real trained weights.
     const policyLikeBehavior: Behavior = {
       id: 'mismatched-policy',
       decide: (self: UnitView, world: WorldView) => {
         const observation = world.observationOf(self);
         if (observation.length !== 17) {
           throw new Error(
-            `policy-smoke-v1: observation length ${observation.length} does not match the trained obsDim 17. ` +
+            `exported-policy Behavior: observation length ${observation.length} does not match the trained obsDim 17. ` +
               'This Behavior was exported for a fixed roster shape (0 allies, 1 enemy).',
           );
         }
@@ -124,10 +125,10 @@ describe('runGauntlet', () => {
   it("the 'general' roster's opponent Behavior is gate-pinned: a real gauntlet run against the real 'aggro-lowest-hp' seed Behavior never misattributes the BASELINE unit's own decide() as the submission's", () => {
     // Regression for Fix 1 (review of PR #137): before the fix, the
     // 'general' baseline roster's opponent Behavior id came from the
-    // submission's own manifest.baseline, and 'policy-smoke-v1' was a
-    // legal value there -- so a submission could (accidentally or not)
-    // make the BASELINE unit itself throw an obsDim-mismatch error, which
-    // the gauntlet reported as the submission's own decide() throwing.
+    // submission's own manifest.baseline, and naming an exported-policy
+    // Behavior there was legal -- so a submission could (accidentally or
+    // not) make the BASELINE unit itself throw an obsDim-mismatch error,
+    // which the gauntlet reported as the submission's own decide() throwing.
     // The manifest no longer has a `baseline` field at all (see
     // manifest.ts / manifest.test.ts), so this can no longer happen
     // structurally: the roster's opponent Behavior id is always

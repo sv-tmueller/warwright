@@ -52,8 +52,22 @@ const buildB = {
 };
 
 describe('OBS_ENCODING_VERSION', () => {
-  it('is pinned to 1', () => {
-    expect(OBS_ENCODING_VERSION).toBe(1);
+  it('is pinned to 2', () => {
+    expect(OBS_ENCODING_VERSION).toBe(2);
+  });
+
+  // Ratchet: growing the skill catalog grows OBS_SELF_FIELD_COUNT (one
+  // cooldown slot per catalog skill), which is itself an encoding-layout
+  // change and therefore a breaking migration (see observation.ts's module
+  // doc comment). Add a mapping row here whenever the catalog grows, so a
+  // catalog change without a matching OBS_ENCODING_VERSION bump goes RED.
+  const OBS_VERSION_BY_CATALOG_SIZE: Record<number, number> = { 6: 1, 10: 2 };
+
+  it('pins OBS_ENCODING_VERSION to the current skill-catalog size', () => {
+    const expected = OBS_VERSION_BY_CATALOG_SIZE[skillCatalog.length];
+    expect(expected).toBeDefined(); // add a mapping row when you grow the catalog
+    expect(OBS_ENCODING_VERSION).toBe(expected);
+    expect(OBS_SELF_FIELD_COUNT).toBe(5 + skillCatalog.length);
   });
 });
 

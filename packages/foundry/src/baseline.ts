@@ -27,12 +27,13 @@ const POLICY_1V1_BASELINE: Warband = loadCommittedWarband('policy-1v1-b.json');
 // field (see manifest.ts): the gauntlet's opponent brain must be a fixed
 // part of the gate, not something the submission itself can pick. Letting a
 // submission choose would let it dodge the bar entirely by naming an
-// opponent it knows it beats -- and, worse, a legal-looking value like
-// 'policy-smoke-v1' made the baseline UNIT itself throw an
-// obsDim-mismatch error (policy-smoke-v1 expects a 0-ally/1-enemy roster,
-// not the 'general' roster's 0-ally/2-enemy shape), which the gauntlet then
-// misattributed to the submission's own decide(). `aggro-lowest-hp` is a
-// simple, always-legal seed Behavior against any roster shape.
+// opponent it knows it beats -- and, worse, a legal-looking value naming an
+// exported-policy Behavior trained on a different roster shape made the
+// baseline UNIT itself throw an obsDim-mismatch error (its expected 0-ally/
+// 1-enemy roster shape didn't match the 'general' roster's 0-ally/2-enemy
+// shape), which the gauntlet then misattributed to the submission's own
+// decide(). `aggro-lowest-hp` is a simple, always-legal seed Behavior
+// against any roster shape.
 export const GATE_GENERAL_BASELINE_BEHAVIOR_ID = 'aggro-lowest-hp';
 
 /**
@@ -42,8 +43,8 @@ export const GATE_GENERAL_BASELINE_BEHAVIOR_ID = 'aggro-lowest-hp';
  *
  * - `'1v1'`: EXACTLY `builds/policy-1v1-b.json`'s warband -- a single
  *   warden running `aggro-lowest-hp` at (15, 0), loaded once at module
- *   load from the committed build file. This is exactly the roster
- *   policy-smoke-v1 (the merged #66 export) was trained to beat (see
+ *   load from the committed build file. This is exactly the roster the
+ *   original #66 exported-policy demo was trained to beat (see
  *   gym/warwright_gym/training/smoke_run.py's `smoke_build_b`), so any
  *   '1v1'-shaped policy submission gets evaluated against the matchup it
  *   actually understands (0 allies, 1 enemy).
@@ -54,10 +55,9 @@ export const GATE_GENERAL_BASELINE_BEHAVIOR_ID = 'aggro-lowest-hp';
  *   multi-opponent bar to clear. Deliberately a DIFFERENT roster shape (0
  *   allies, 2 enemies) than '1v1' (0 allies, 1 enemy): a policy Behavior
  *   mistakenly declared `shape: 'general'` faces an observation of the
- *   wrong length and throws its own roster-shape error (see
- *   policy-smoke-v1.ts) -- surfaced as a clear stage-3 message by
- *   gauntlet.ts, per the SUB_PLAN's "surface a clear stage-3 message on a
- *   shape mismatch."
+ *   wrong length and throws its own roster-shape error -- surfaced as a
+ *   clear stage-3 message by gauntlet.ts, per the SUB_PLAN's "surface a
+ *   clear stage-3 message on a shape mismatch."
  */
 export function baselineWarbandFor(manifest: SubmissionManifest): Warband {
   if (manifest.shape === '1v1') {

@@ -1,14 +1,18 @@
 {
-  "obsEncodingVersion": 1,
+  "obsEncodingVersion": 2,
   "skillCatalog": [
     "shield-bash",
     "guardian-ward",
     "cleave",
     "frost-bolt",
     "venom-shot",
-    "mending-touch"
+    "mending-touch",
+    "piercing-shot",
+    "battle-cry",
+    "crippling-strike",
+    "rally"
   ],
-  "skillCatalogLength": 6,
+  "skillCatalogLength": 10,
   "actions": [
     {
       "kind": "idle",
@@ -93,6 +97,10 @@
       -1,
       -1,
       -1,
+      -1,
+      -1,
+      -1,
+      -1,
       1,
       110,
       110,
@@ -106,9 +114,9 @@
       100,
       90000
     ],
-    "length": 23
+    "length": 27
   },
-  "selfFieldCount": 11,
+  "selfFieldCount": 15,
   "unitFieldCount": 6,
   "numAllies": 1,
   "numEnemies": 1
