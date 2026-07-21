@@ -20,6 +20,8 @@ describe('loadConfig', () => {
       cookieSecure: false,
       queueWindowMs: 5000,
       queueMaxPool: 8,
+      queueMaxFailures: 3,
+      queueMaxAgeMs: 60_000,
     });
   });
 
@@ -143,6 +145,53 @@ describe('loadConfig', () => {
         DATABASE_URL: 'postgresql://user:pass@localhost:5432/warwright',
         SESSION_SECRET,
         QUEUE_MAX_POOL: '1',
+      })
+    ).toThrow();
+  });
+
+  it('defaults QUEUE_MAX_FAILURES to 3 and QUEUE_MAX_AGE_MS to 60000', () => {
+    const config = loadConfig({
+      DATABASE_URL: 'postgresql://user:pass@localhost:5432/warwright',
+      SESSION_SECRET,
+    });
+    expect(config.queueMaxFailures).toBe(3);
+    expect(config.queueMaxAgeMs).toBe(60_000);
+  });
+
+  it('parses explicit QUEUE_MAX_FAILURES and QUEUE_MAX_AGE_MS', () => {
+    const config = loadConfig({
+      DATABASE_URL: 'postgresql://user:pass@localhost:5432/warwright',
+      SESSION_SECRET,
+      QUEUE_MAX_FAILURES: '5',
+      QUEUE_MAX_AGE_MS: '120000',
+    });
+    expect(config.queueMaxFailures).toBe(5);
+    expect(config.queueMaxAgeMs).toBe(120_000);
+  });
+
+  it('throws loudly when QUEUE_MAX_FAILURES is below 1', () => {
+    expect(() =>
+      loadConfig({
+        DATABASE_URL: 'postgresql://user:pass@localhost:5432/warwright',
+        SESSION_SECRET,
+        QUEUE_MAX_FAILURES: '0',
+      })
+    ).toThrow();
+  });
+
+  it('throws loudly when QUEUE_MAX_AGE_MS is not a positive integer', () => {
+    expect(() =>
+      loadConfig({
+        DATABASE_URL: 'postgresql://user:pass@localhost:5432/warwright',
+        SESSION_SECRET,
+        QUEUE_MAX_AGE_MS: '0',
+      })
+    ).toThrow();
+    expect(() =>
+      loadConfig({
+        DATABASE_URL: 'postgresql://user:pass@localhost:5432/warwright',
+        SESSION_SECRET,
+        QUEUE_MAX_AGE_MS: 'not-a-number',
       })
     ).toThrow();
   });

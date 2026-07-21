@@ -8,18 +8,22 @@ import { DEFAULT_RATING, ratings, warbands } from '../db/schema.js';
 import { resolveMatch } from '../matches/resolve.js';
 import { MatchResultResponseSchema } from '../matches/schemas.js';
 import { applyMatchRatings } from '../ratings/service.js';
-import { createQueueService, type Pairing, type QueueService, type Scheduler } from './service.js';
+import { createQueueService, type Pairing, type QueueEviction, type QueueService, type Scheduler } from './service.js';
 
 export interface QueueRoutesOptions {
   db: Database;
   queue?: QueueConfig;
 }
 
-/** Matchmaking batching-window config, threaded from BuildAppOptions.queue through to createQueueService. All fields optional: omitted ones fall back to createQueueService's own defaults (production timers, DEFAULT_QUEUE_WINDOW_MS/DEFAULT_QUEUE_MAX_POOL). */
+/** Matchmaking batching-window config, threaded from BuildAppOptions.queue through to createQueueService. All fields optional: omitted ones fall back to createQueueService's own defaults (production timers, DEFAULT_QUEUE_WINDOW_MS/DEFAULT_QUEUE_MAX_POOL/DEFAULT_QUEUE_MAX_FAILURES/DEFAULT_QUEUE_MAX_AGE_MS). */
 export interface QueueConfig {
   windowMs?: number;
   maxPool?: number;
   scheduler?: Scheduler;
+  /** Bounded-eviction failure-count cap (#144); see queue/service.ts's restoreOrEvict doc comment. */
+  maxFailures?: number;
+  /** Bounded-eviction age cap in ms (#144); see queue/service.ts's restoreOrEvict doc comment. */
+  maxAgeMs?: number;
   /**
    * Test-only escape hatch: called once, synchronously, with the
    * QueueService instance this plugin registration creates. HTTP-level
@@ -124,6 +128,23 @@ async function resolveOnePairing(
 }
 
 /**
+ * The onEviction callback injected into createQueueService() (#144): logs
+ * every bounded-eviction (see QueueEviction's doc comment) via app.log.
+ * QueueService's own state mutation (dropping the entry instead of
+ * restoring it) has already happened by the time this runs — this is
+ * purely the observability side, exactly like resolveOnePairing's
+ * failPairing log line above.
+ */
+function createEvictionLogger(log: FastifyBaseLogger): (eviction: QueueEviction) => void {
+  return (eviction) => {
+    log.warn(
+      { userId: eviction.userId, reason: eviction.reason, failureCount: eviction.failureCount, ageMs: eviction.ageMs },
+      'queue entry evicted by the bounded-eviction policy: repeated pairing failures or excessive queue age'
+    );
+  };
+}
+
+/**
  * The resolver callback injected into createQueueService(): invoked with
  * every pairing a pass produces, resolving them concurrently (each pairing
  * is independent — no shared queue-state mutation happens inside
@@ -170,6 +191,9 @@ const queueRoutes: FastifyPluginAsyncZod<QueueRoutesOptions> = async (app, optio
     windowMs: queue?.windowMs,
     maxPool: queue?.maxPool,
     scheduler: queue?.scheduler,
+    maxFailures: queue?.maxFailures,
+    maxAgeMs: queue?.maxAgeMs,
+    onEviction: createEvictionLogger(app.log),
   });
   queueServiceBox.current = queueService;
   queue?.onQueueServiceCreated?.(queueService);
