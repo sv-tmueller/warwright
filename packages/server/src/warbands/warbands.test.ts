@@ -217,6 +217,68 @@ describe.skipIf(!url)('warband routes', () => {
     await app.close();
   });
 
+  it('round-trips a non-empty augmentIds array intact through POST -> GET -> PUT -> GET (Slice E, #151)', async () => {
+    // augmentIds entries are opaque ids at the schema level (AugmentIdSchema
+    // is z.string().min(1)); core only resolves them against its registry at
+    // match-time (sim/init.ts), and the registry is empty until Slice D
+    // (#150) lands. The warbands routes never resolve augment ids against
+    // the registry (findUnknownContentId in routes.ts checks only roleId,
+    // skillId, behaviorId) -- so this fixture id need not be registered for
+    // the write path to accept and round-trip it.
+    const app = buildTestApp();
+    const { cookie, csrfToken } = await registerAndAuthenticate(app);
+
+    const withAugments = {
+      ...warbandA,
+      units: (warbandA as { units: Array<Record<string, unknown>> }).units.map((unit, index) =>
+        index === 0 ? { ...unit, augmentIds: ['iron-plating', 'iron-plating'] } : unit
+      ),
+    };
+
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/warbands',
+      headers: { cookie, 'csrf-token': csrfToken },
+      payload: withAugments,
+    });
+    expect(createResponse.statusCode).toBe(201);
+    const created = createResponse.json() as { id: string; data: { units: Array<{ augmentIds: string[] }> } };
+    expect(created.data.units[0]?.augmentIds).toEqual(['iron-plating', 'iron-plating']);
+    expect(created.data.units[1]?.augmentIds).toEqual([]);
+
+    const getAfterCreate = await app.inject({
+      method: 'GET',
+      url: `/warbands/${created.id}`,
+      headers: { cookie },
+    });
+    expect(getAfterCreate.statusCode).toBe(200);
+    const fetchedAfterCreate = getAfterCreate.json() as { data: { units: Array<{ augmentIds: string[] }> } };
+    expect(fetchedAfterCreate.data.units[0]?.augmentIds).toEqual(['iron-plating', 'iron-plating']);
+
+    const putResponse = await app.inject({
+      method: 'PUT',
+      url: `/warbands/${created.id}`,
+      headers: { cookie, 'csrf-token': csrfToken },
+      payload: { ...withAugments, name: 'Iron Vanguard III' },
+    });
+    expect(putResponse.statusCode).toBe(200);
+    const updated = putResponse.json() as { data: { units: Array<{ augmentIds: string[] }> } };
+    expect(updated.data.units[0]?.augmentIds).toEqual(['iron-plating', 'iron-plating']);
+    expect(updated.data.units[1]?.augmentIds).toEqual([]);
+
+    const getAfterUpdate = await app.inject({
+      method: 'GET',
+      url: `/warbands/${created.id}`,
+      headers: { cookie },
+    });
+    expect(getAfterUpdate.statusCode).toBe(200);
+    const fetchedAfterUpdate = getAfterUpdate.json() as { data: { units: Array<{ augmentIds: string[] }> } };
+    expect(fetchedAfterUpdate.data.units[0]?.augmentIds).toEqual(['iron-plating', 'iron-plating']);
+    expect(fetchedAfterUpdate.data.units[1]?.augmentIds).toEqual([]);
+
+    await app.close();
+  });
+
   it('scopes access to the owning account: cross-account GET/PUT/DELETE all 404, list excludes foreign rows', async () => {
     const app = buildTestApp();
     const userA = await registerAndAuthenticate(app);
