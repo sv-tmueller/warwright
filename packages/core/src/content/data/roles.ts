@@ -33,4 +33,24 @@ export const roles = [
     moveSpeed: 4,
     attack: { damage: 4, rangeSquared: 40000, cooldownTicks: 30 },
   },
+  {
+    id: 'skirmisher',
+    name: 'Skirmisher',
+    // Fast, fragile harasser: the roster's quickest mover, but low hp and
+    // armor mean it dies fast if it gets pinned down.
+    maxHp: 70,
+    armor: 1,
+    moveSpeed: 8,
+    attack: { damage: 14, rangeSquared: 625, cooldownTicks: 15 },
+  },
+  {
+    id: 'bulwark',
+    name: 'Bulwark',
+    // Slow, high-hp frontline: tankier than every other role (hp + armor),
+    // and no faster than any of them, trading speed and damage for bulk.
+    maxHp: 260,
+    armor: 14,
+    moveSpeed: 2,
+    attack: { damage: 6, rangeSquared: 225, cooldownTicks: 25 },
+  },
 ] satisfies readonly Role[];

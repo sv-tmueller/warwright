@@ -14,7 +14,14 @@ describe('@warwright/core', () => {
   });
 
   it('exposes the seed role enumeration', () => {
-    expect(roles.map((role) => role.id)).toEqual(['vanguard', 'warden', 'reaver', 'mender']);
+    expect(roles.map((role) => role.id)).toEqual([
+      'vanguard',
+      'warden',
+      'reaver',
+      'mender',
+      'skirmisher',
+      'bulwark',
+    ]);
   });
 
   it('exposes the seed skill enumeration', () => {
