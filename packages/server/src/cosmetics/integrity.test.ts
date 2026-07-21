@@ -45,7 +45,7 @@ import { runMigrations } from '../db/migrate.js';
 import { matches } from '../db/schema.js';
 import type { ResolveMatchInput } from '../matches/resolve.js';
 import { resolveMatch } from '../matches/resolve.js';
-import { CosmeticSlotSchema } from './catalog.js';
+import { COSMETICS, CosmeticSlotSchema, DEFAULT_COSMETIC_BY_SLOT } from './catalog.js';
 import { noopEntitlementProvider, type EntitlementProvider } from './entitlement.js';
 
 const url = process.env.DATABASE_URL;
@@ -230,6 +230,133 @@ describe('Assertion 3: behavioral resolve-invariance', () => {
       expect(result.eventLog).toEqual(baseline.eventLog);
     }
   });
+
+  describe.skipIf(!url)(
+    'the acceptance test: resolveMatch against a real DB is invariant across varied real cosmetic ownership/selection state',
+    () => {
+      let db: Database;
+      let pool: Awaited<ReturnType<typeof createDb>>['pool'];
+
+      beforeAll(async () => {
+        ({ db, pool } = createDb(url!));
+        await runMigrations(url!);
+      });
+
+      afterAll(async () => {
+        await pool.end();
+      });
+
+      function extractCookie(setCookieHeader: string | string[] | undefined): string {
+        const header = Array.isArray(setCookieHeader) ? setCookieHeader[0] : setCookieHeader;
+        if (!header) throw new Error('expected a Set-Cookie header');
+        return header.split(';', 1)[0] ?? '';
+      }
+
+      it('winner + hash + event-log are identical across maximal/none, swapped, and cleared cosmetic states', async () => {
+        const app = buildApp({
+          db,
+          pool,
+          session: { secret: 'a'.repeat(32), cookieSecure: false, pruneSessionInterval: false },
+        });
+
+        async function registerUser() {
+          const preCsrf = await app.inject({ method: 'GET', url: '/auth/csrf' });
+          const preCookie = extractCookie(preCsrf.headers['set-cookie']);
+          const { csrfToken: preToken } = preCsrf.json() as { csrfToken: string };
+          const registerResponse = await app.inject({
+            method: 'POST',
+            url: '/auth/register',
+            headers: { cookie: preCookie, 'csrf-token': preToken },
+            payload: {
+              email: `integrity-behavioral-${Date.now()}-${Math.random()}@example.com`,
+              password: 'correct horse battery staple',
+            },
+          });
+          const { id } = registerResponse.json() as { id: string };
+          const cookie = extractCookie(registerResponse.headers['set-cookie']);
+          const csrfResponse = await app.inject({ method: 'GET', url: '/auth/csrf', headers: { cookie } });
+          const { csrfToken } = csrfResponse.json() as { csrfToken: string };
+          return { id, cookie, csrfToken };
+        }
+
+        async function acquireAndSelectMaximal(account: { cookie: string; csrfToken: string }) {
+          for (const cosmetic of COSMETICS.filter((c) => !c.defaultOwned)) {
+            const response = await app.inject({
+              method: 'POST',
+              url: '/cosmetics/acquire',
+              headers: { cookie: account.cookie, 'csrf-token': account.csrfToken },
+              payload: { cosmeticId: cosmetic.id },
+            });
+            expect(response.statusCode).toBe(201);
+          }
+          for (const slot of CosmeticSlotSchema.options) {
+            const nonDefault = COSMETICS.find((c) => c.slot === slot && !c.defaultOwned)!;
+            const response = await app.inject({
+              method: 'PUT',
+              url: '/cosmetics/selection',
+              headers: { cookie: account.cookie, 'csrf-token': account.csrfToken },
+              payload: { slot, cosmeticId: nonDefault.id },
+            });
+            expect(response.statusCode).toBe(200);
+          }
+        }
+
+        async function resetSelectionToDefaults(account: { cookie: string; csrfToken: string }) {
+          for (const slot of CosmeticSlotSchema.options) {
+            const response = await app.inject({
+              method: 'PUT',
+              url: '/cosmetics/selection',
+              headers: { cookie: account.cookie, 'csrf-token': account.csrfToken },
+              payload: { slot, cosmeticId: DEFAULT_COSMETIC_BY_SLOT[slot] },
+            });
+            expect(response.statusCode).toBe(200);
+          }
+        }
+
+        const userA = await registerUser();
+        const userB = await registerUser();
+
+        async function resolveFixed() {
+          return resolveMatch(db, {
+            userAId: userA.id,
+            userBId: userB.id,
+            buildA: warbandA,
+            buildB: warbandB,
+            seed: 123,
+          });
+        }
+
+        // State 1: A has a maximal cosmetic loadout (every acquirable
+        // cosmetic owned and selected), B has none beyond the catalog
+        // defaults.
+        await acquireAndSelectMaximal(userA);
+        const state1 = await resolveFixed();
+
+        // State 2 (swap): A's selection resets to catalog defaults (still
+        // owns everything, just not selected), B now acquires and selects
+        // the maximal loadout instead.
+        await resetSelectionToDefaults(userA);
+        await acquireAndSelectMaximal(userB);
+        const state2 = await resolveFixed();
+
+        // State 3 (clear): both accounts' selections reset to catalog
+        // defaults (ownership rows remain, but nothing non-default is
+        // selected on either side).
+        await resetSelectionToDefaults(userB);
+        const state3 = await resolveFixed();
+
+        expect(state2.result.winner).toBe(state1.result.winner);
+        expect(state2.result.hash).toBe(state1.result.hash);
+        expect(state2.result.eventLog).toEqual(state1.result.eventLog);
+
+        expect(state3.result.winner).toBe(state1.result.winner);
+        expect(state3.result.hash).toBe(state1.result.hash);
+        expect(state3.result.eventLog).toEqual(state1.result.eventLog);
+
+        await app.close();
+      });
+    }
+  );
 });
 
 describe('Assertion 4: anti-loot-box', () => {
