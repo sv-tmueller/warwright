@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DEFAULT_QUEUE_MAX_POOL, DEFAULT_QUEUE_WINDOW_MS } from './queue/service.js';
 
 const EnvSchema = z.object({
   DATABASE_URL: z.url(),
@@ -14,6 +15,14 @@ const EnvSchema = z.object({
   // reads the string's actual truthiness and fails loud on unrecognized
   // values.
   COOKIE_SECURE: z.stringbool().default(false),
+  // Matchmaking batching-window duration (ms); see queue/service.ts's
+  // QueueService doc comment and the #108 sub-plan. The client polls GET
+  // /queue at 2s, so perceived wait is ~window+2s.
+  QUEUE_WINDOW_MS: z.coerce.number().int().positive().default(DEFAULT_QUEUE_WINDOW_MS),
+  // Pool size (K) that triggers an immediate pairing pass without waiting
+  // for the window timer. Must be at least 2 (a pass needs two entries to
+  // ever pair anyone).
+  QUEUE_MAX_POOL: z.coerce.number().int().min(2).default(DEFAULT_QUEUE_MAX_POOL),
 });
 
 export interface Config {
@@ -22,6 +31,8 @@ export interface Config {
   host: string;
   sessionSecret: string;
   cookieSecure: boolean;
+  queueWindowMs: number;
+  queueMaxPool: number;
 }
 
 /**
@@ -37,5 +48,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     host: parsed.HOST,
     sessionSecret: parsed.SESSION_SECRET,
     cookieSecure: parsed.COOKIE_SECURE,
+    queueWindowMs: parsed.QUEUE_WINDOW_MS,
+    queueMaxPool: parsed.QUEUE_MAX_POOL,
   };
 }
