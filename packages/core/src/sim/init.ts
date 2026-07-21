@@ -26,15 +26,32 @@ function buildUnit(
     registry.getBehavior(build.behaviorId);
   }
 
+  // Resolved eagerly (unknown id fails loud at init) and folded additively,
+  // in augmentIds order, over the Role-derived stat-line. Init-time only:
+  // never an ongoing per-tick effect, same category as a Role's own
+  // stat-line.
+  const augments = build.augmentIds.map((augmentId) => registry.getAugment(augmentId));
+  let maxHp = role.maxHp;
+  let armor = role.armor;
+  let moveSpeed = role.moveSpeed;
+  for (const augment of augments) {
+    maxHp += augment.maxHpDelta ?? 0;
+    armor += augment.armorDelta ?? 0;
+    moveSpeed += augment.moveSpeedDelta ?? 0;
+  }
+  maxHp = Math.max(1, maxHp);
+  armor = Math.max(0, armor);
+  moveSpeed = Math.max(1, moveSpeed);
+
   return {
     id,
     team,
     roleId: build.roleId,
     behaviorId: build.behaviorId,
-    maxHp: role.maxHp,
-    hp: role.maxHp,
-    armor: role.armor,
-    moveSpeed: role.moveSpeed,
+    maxHp,
+    hp: maxHp,
+    armor,
+    moveSpeed,
     attackDamage: role.attack.damage,
     attackRangeSquared: role.attack.rangeSquared,
     attackCooldownTicks: role.attack.cooldownTicks,
@@ -43,6 +60,8 @@ function buildUnit(
     skills: skillStates,
     slow: null,
     shield: null,
+    stun: null,
+    empower: null,
     activeDots: [],
   };
 }

@@ -27,6 +27,8 @@ function makeUnit(overrides: Partial<Unit> = {}): Unit {
     skills: [],
     slow: null,
     shield: null,
+    stun: null,
+    empower: null,
     activeDots: [],
     ...overrides,
   };
@@ -512,6 +514,110 @@ describe('stepTick', () => {
     const registry = makeRegistry({ idle: () => idle });
 
     expect(stepTick(world, registry)).toBeNull();
+  });
+
+  describe('stun gating', () => {
+    it('suppresses a move action for a stunned unit: pos unchanged, no move event', () => {
+      const unit = makeUnit({
+        id: 1,
+        behaviorId: 'mover',
+        pos: { x: 0, y: 0 },
+        moveSpeed: 3,
+        stun: { magnitude: 0, remainingTicks: 5 },
+      });
+      const world = makeWorld([unit]);
+      const registry = makeRegistry({
+        mover: () => ({ kind: 'move', to: { x: 10, y: 0 } }),
+      });
+
+      stepTick(world, registry);
+
+      expect(unit.pos).toEqual({ x: 0, y: 0 });
+      expect(world.eventLog.filter((e) => e.kind === 'move')).toEqual([]);
+    });
+
+    it('suppresses an attack action for a stunned unit: target hp unchanged, no attack/damage events', () => {
+      const attacker = makeUnit({
+        id: 1,
+        behaviorId: 'attacker',
+        pos: { x: 0, y: 0 },
+        attackRangeSquared: 100,
+        stun: { magnitude: 0, remainingTicks: 5 },
+      });
+      const target = makeUnit({ id: 2, team: 'B', behaviorId: 'idle', pos: { x: 5, y: 0 }, hp: 50 });
+      const world = makeWorld([attacker, target]);
+      const registry = makeRegistry({
+        attacker: () => ({ kind: 'attack', targetId: 2 }),
+        idle: () => idle,
+      });
+
+      stepTick(world, registry);
+
+      expect(target.hp).toBe(50);
+      expect(world.eventLog.filter((e) => e.kind === 'attack' || e.kind === 'damage')).toEqual([]);
+    });
+
+    it('still ticks cooldowns and the stun timer for a stunned unit', () => {
+      const unit = makeUnit({
+        id: 1,
+        behaviorId: 'idle',
+        attackCooldownRemaining: 3,
+        stun: { magnitude: 0, remainingTicks: 2 },
+      });
+      const world = makeWorld([unit]);
+      const registry = makeRegistry({ idle: () => idle });
+
+      stepTick(world, registry);
+
+      expect(unit.attackCooldownRemaining).toBe(2);
+      expect(unit.stun).toEqual({ magnitude: 0, remainingTicks: 1 });
+    });
+
+    it('still calls decide (RNG draw order unaffected) for a stunned unit even though the action is not applied', () => {
+      const unit = makeUnit({
+        id: 1,
+        behaviorId: 'mover',
+        pos: { x: 0, y: 0 },
+        stun: { magnitude: 0, remainingTicks: 5 },
+      });
+      const world = makeWorld([unit]);
+      let decideCalled = false;
+      const registry = makeRegistry({
+        mover: () => {
+          decideCalled = true;
+          return { kind: 'move', to: { x: 10, y: 0 } };
+        },
+      });
+
+      stepTick(world, registry);
+
+      expect(decideCalled).toBe(true);
+      expect(unit.pos).toEqual({ x: 0, y: 0 });
+    });
+
+    it('acts again once the stun expires', () => {
+      const unit = makeUnit({
+        id: 1,
+        behaviorId: 'mover',
+        pos: { x: 0, y: 0 },
+        moveSpeed: 3,
+        stun: { magnitude: 0, remainingTicks: 1 },
+      });
+      const world = makeWorld([unit]);
+      const registry = makeRegistry({
+        mover: () => ({ kind: 'move', to: { x: 10, y: 0 } }),
+      });
+
+      // Tick 1: stunned this tick (action suppressed), stun expires during
+      // this tick's housekeeping.
+      stepTick(world, registry);
+      expect(unit.pos).toEqual({ x: 0, y: 0 });
+      expect(unit.stun).toBeNull();
+
+      // Tick 2: no longer stunned, the move action applies normally.
+      stepTick(world, registry);
+      expect(unit.pos).toEqual({ x: 3, y: 0 });
+    });
   });
 
   describe('external action injection', () => {

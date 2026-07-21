@@ -51,7 +51,15 @@ describe('Zod validation reuses core schemas', () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual(sampleWarband);
+    // The echoed body is the PARSED (Zod-validated) request, not the raw
+    // payload: WarbandSchema defaults each unit's augmentIds to [] (see
+    // core's UnitBuildSchema), so the response carries that field even
+    // though the raw fixture predates it.
+    const sampleWarbandUnits = (sampleWarband as { units: Array<Record<string, unknown>> }).units;
+    expect(response.json()).toEqual({
+      ...sampleWarband,
+      units: sampleWarbandUnits.map((unit) => ({ ...unit, augmentIds: [] })),
+    });
 
     await app.close();
   });

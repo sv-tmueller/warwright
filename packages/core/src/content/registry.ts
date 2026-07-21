@@ -1,20 +1,23 @@
-import { BehaviorIdSchema, parseRole, parseSkill } from './schemas.js';
-import type { Role, Skill } from './schemas.js';
+import { BehaviorIdSchema, parseAugment, parseRole, parseSkill } from './schemas.js';
+import type { Augment, Role, Skill } from './schemas.js';
 import type { Behavior } from '../sim/behavior.js';
 
 export type ContentRegistry = {
   registerBehavior(behavior: Behavior): void;
   loadRole(data: unknown): Role;
   loadSkill(data: unknown): Skill;
+  loadAugment(data: unknown): Augment;
   getBehavior(id: string): Behavior;
   getRole(id: string): Role;
   getSkill(id: string): Skill;
+  getAugment(id: string): Augment;
 };
 
 export function createContentRegistry(): ContentRegistry {
   const behaviors = new Map<string, Behavior>();
   const roles = new Map<string, Role>();
   const skills = new Map<string, Skill>();
+  const augments = new Map<string, Augment>();
 
   function registerBehavior(behavior: Behavior): void {
     const id = BehaviorIdSchema.parse(behavior.id);
@@ -42,6 +45,15 @@ export function createContentRegistry(): ContentRegistry {
     return skill;
   }
 
+  function loadAugment(data: unknown): Augment {
+    const augment = parseAugment(data);
+    if (augments.has(augment.id)) {
+      throw new Error(`Duplicate augment id: ${augment.id}`);
+    }
+    augments.set(augment.id, augment);
+    return augment;
+  }
+
   function getBehavior(id: string): Behavior {
     const behavior = behaviors.get(id);
     if (!behavior) {
@@ -66,5 +78,22 @@ export function createContentRegistry(): ContentRegistry {
     return skill;
   }
 
-  return { registerBehavior, loadRole, loadSkill, getBehavior, getRole, getSkill };
+  function getAugment(id: string): Augment {
+    const augment = augments.get(id);
+    if (!augment) {
+      throw new Error(`Unknown augment id: ${id}`);
+    }
+    return augment;
+  }
+
+  return {
+    registerBehavior,
+    loadRole,
+    loadSkill,
+    loadAugment,
+    getBehavior,
+    getRole,
+    getSkill,
+    getAugment,
+  };
 }

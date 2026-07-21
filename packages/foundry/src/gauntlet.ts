@@ -46,6 +46,7 @@ function submissionWarband(manifest: SubmissionManifest): Warband {
         skillIds: manifest.build.skillIds,
         behaviorId: manifest.id,
         position: manifest.build.position,
+        augmentIds: manifest.build.augmentIds,
       },
     ],
   };

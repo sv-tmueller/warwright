@@ -24,9 +24,10 @@ export {
   encodeObservation,
 } from './sim/observation.js';
 export { BehaviorIdSchema, parseWarband, UnitBuildSchema, WarbandSchema } from './content/schemas.js';
-export type { Role, Skill, UnitBuild, Warband } from './content/schemas.js';
+export type { Augment, Role, Skill, UnitBuild, Warband } from './content/schemas.js';
 export { roles } from './content/data/roles.js';
 export { skills } from './content/data/skills.js';
+export { augments } from './content/data/augments.js';
 
 // The exported #66a/#66b policy-smoke-v1 Behavior (weights + pure-TS
 // float64 inference; see policy-smoke-v1.ts), re-exported by NAME

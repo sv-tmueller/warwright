@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import warbandA from '../../../../builds/warband-a.json' with { type: 'json' };
 import warbandB from '../../../../builds/warband-b.json' with { type: 'json' };
+import { createSeedRegistry } from './seed-registry.js';
 import { EXTERNAL_BEHAVIOR_ID } from './constants.js';
 import { mulberry32 } from './prng.js';
-import { init } from './init.js';
+import { init, initWithRegistry } from './init.js';
 
 const VERSION = 1;
 const SEED = 42;
@@ -66,6 +67,8 @@ describe('init', () => {
       expect(unit.slow).toBeNull();
       expect(unit.shield).toBeNull();
       expect(unit.activeDots).toEqual([]);
+      expect(unit.stun).toBeNull();
+      expect(unit.empower).toBeNull();
     }
   });
 
@@ -147,6 +150,98 @@ describe('init', () => {
 
     const freshRng = mulberry32(SEED);
     expect(world.rng.next()).toEqual(freshRng.next());
+  });
+
+  describe('augment stat-delta application', () => {
+    function buildWithAugments(augmentIds: string[]) {
+      const badBuild = structuredClone(warbandA) as {
+        units: Array<{ augmentIds?: string[] }>;
+      };
+      badBuild.units[0]!.augmentIds = augmentIds;
+      return badBuild;
+    }
+
+    it('applies a single augment delta additively over the role stat-line, floors hp to maxHp', () => {
+      const registry = createSeedRegistry();
+      registry.loadAugment({ id: 'iron-plating', name: 'Iron Plating', armorDelta: 5 });
+      const build = buildWithAugments(['iron-plating']);
+
+      const world = initWithRegistry(3, SEED, build, warbandB, registry);
+      const vanguard = world.units[0];
+
+      // Base vanguard: maxHp 200, armor 10, moveSpeed 3 (content/data/roles.ts).
+      expect(vanguard?.armor).toBe(15);
+      expect(vanguard?.maxHp).toBe(200);
+      expect(vanguard?.moveSpeed).toBe(3);
+      expect(vanguard?.hp).toBe(vanguard?.maxHp);
+    });
+
+    it('applies two distinct augments plus a duplicate id, stacking additively in augmentIds order', () => {
+      const registry = createSeedRegistry();
+      registry.loadAugment({ id: 'iron-plating', name: 'Iron Plating', armorDelta: 5 });
+      registry.loadAugment({ id: 'swift-boots', name: 'Swift Boots', moveSpeedDelta: 2 });
+      const build = buildWithAugments(['iron-plating', 'swift-boots', 'iron-plating']);
+
+      const world = initWithRegistry(3, SEED, build, warbandB, registry);
+      const vanguard = world.units[0];
+
+      expect(vanguard?.armor).toBe(20); // 10 + 5 + 5
+      expect(vanguard?.moveSpeed).toBe(5); // 3 + 2
+      expect(vanguard?.maxHp).toBe(200);
+      expect(vanguard?.hp).toBe(vanguard?.maxHp);
+    });
+
+    it('applies maxHpDelta and sets hp to the new maxHp', () => {
+      const registry = createSeedRegistry();
+      registry.loadAugment({ id: 'vital-surge', name: 'Vital Surge', maxHpDelta: 50 });
+      const build = buildWithAugments(['vital-surge']);
+
+      const world = initWithRegistry(3, SEED, build, warbandB, registry);
+      const vanguard = world.units[0];
+
+      expect(vanguard?.maxHp).toBe(250);
+      expect(vanguard?.hp).toBe(250);
+    });
+
+    it('floors maxHp at 1, armor at 0, and moveSpeed at 1 when negative deltas would push below the floor', () => {
+      const registry = createSeedRegistry();
+      registry.loadAugment({
+        id: 'lopsided',
+        name: 'Lopsided',
+        maxHpDelta: -1000,
+        armorDelta: -1000,
+        moveSpeedDelta: -1000,
+      });
+      const build = buildWithAugments(['lopsided']);
+
+      const world = initWithRegistry(3, SEED, build, warbandB, registry);
+      const vanguard = world.units[0];
+
+      expect(vanguard?.maxHp).toBe(1);
+      expect(vanguard?.armor).toBe(0);
+      expect(vanguard?.moveSpeed).toBe(1);
+      expect(vanguard?.hp).toBe(1);
+    });
+
+    it('throws loud on an unknown augmentId at init', () => {
+      const registry = createSeedRegistry();
+      const build = buildWithAugments(['not-a-real-augment']);
+
+      expect(() => initWithRegistry(3, SEED, build, warbandB, registry)).toThrow(
+        'Unknown augment id: not-a-real-augment',
+      );
+    });
+
+    it('leaves a unit with no augmentIds unaffected (base role stats, stun/empower null)', () => {
+      const world = init(VERSION, SEED, warbandA, warbandB);
+      const vanguard = world.units[0];
+
+      expect(vanguard?.maxHp).toBe(200);
+      expect(vanguard?.armor).toBe(10);
+      expect(vanguard?.moveSpeed).toBe(3);
+      expect(vanguard?.stun).toBeNull();
+      expect(vanguard?.empower).toBeNull();
+    });
   });
 
   it('is deterministic and draws nothing from rng', () => {

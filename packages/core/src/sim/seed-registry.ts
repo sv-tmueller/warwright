@@ -2,6 +2,7 @@ import { createContentRegistry } from '../content/registry.js';
 import type { ContentRegistry } from '../content/registry.js';
 import { roles } from '../content/data/roles.js';
 import { skills } from '../content/data/skills.js';
+import { augments } from '../content/data/augments.js';
 import {
   aggroLowestHp,
   focusCasters,
@@ -24,6 +25,7 @@ export function createSeedRegistryWith(extra: readonly Behavior[]): ContentRegis
   const registry = createContentRegistry();
   for (const role of roles) registry.loadRole(role);
   for (const skill of skills) registry.loadSkill(skill);
+  for (const augment of augments) registry.loadAugment(augment);
   registry.registerBehavior(aggroLowestHp);
   registry.registerBehavior(protectAllies);
   registry.registerBehavior(focusCasters);

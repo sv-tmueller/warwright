@@ -178,7 +178,13 @@ describe('api-client: saveWarband validates before fetching', () => {
     expect(result.ok).toBe(true);
     expect(calls.map((call) => call.url)).toEqual(['/auth/csrf', '/warbands']);
     expect(calls[1]?.init?.method).toBe('POST');
-    expect(JSON.parse(String(calls[1]?.init?.body))).toEqual(warbandAJson);
+    // The POST body is the PARSED warband, not the raw input: parseWarband
+    // defaults each unit's augmentIds to [] (see UnitBuildSchema), so the
+    // body carries that field even though the raw fixture predates it.
+    expect(JSON.parse(String(calls[1]?.init?.body))).toEqual({
+      ...warbandAJson,
+      units: warbandAJson.units.map((unit) => ({ ...unit, augmentIds: [] })),
+    });
   });
 });
 

@@ -33,6 +33,7 @@ describe('baselineWarbandFor', () => {
         skillIds: [],
         behaviorId: 'aggro-lowest-hp',
         position: { x: 15, y: 0 },
+        augmentIds: [],
       },
     ]);
   });

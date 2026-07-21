@@ -21,6 +21,8 @@ function makeUnit(overrides: Partial<Unit> = {}): Unit {
     skills: [],
     slow: null,
     shield: null,
+    stun: null,
+    empower: null,
     activeDots: [],
     ...overrides,
   };
@@ -127,6 +129,58 @@ describe('applyStatus', () => {
 
     expect(unit.pos).toEqual(posBefore);
   });
+
+  it('sets stun when none is active', () => {
+    const unit = makeUnit();
+    const log: MatchEvent[] = [];
+
+    applyStatus(unit, 'stun', 20, 0, log, 3);
+
+    expect(unit.stun).toEqual({ magnitude: 0, remainingTicks: 20 });
+    expect(log[0]).toEqual({
+      kind: 'status-applied',
+      tick: 3,
+      targetId: unit.id,
+      status: 'stun',
+      magnitude: 0,
+      durationTicks: 20,
+    });
+  });
+
+  it('overwrites an existing stun on re-apply (single-slot, last write wins)', () => {
+    const unit = makeUnit({ stun: { magnitude: 0, remainingTicks: 5 } });
+    const log: MatchEvent[] = [];
+
+    applyStatus(unit, 'stun', 20, 0, log, 3);
+
+    expect(unit.stun).toEqual({ magnitude: 0, remainingTicks: 20 });
+  });
+
+  it('sets empower when none is active', () => {
+    const unit = makeUnit();
+    const log: MatchEvent[] = [];
+
+    applyStatus(unit, 'empower', 30, 25, log, 4);
+
+    expect(unit.empower).toEqual({ magnitude: 25, remainingTicks: 30 });
+    expect(log[0]).toEqual({
+      kind: 'status-applied',
+      tick: 4,
+      targetId: unit.id,
+      status: 'empower',
+      magnitude: 25,
+      durationTicks: 30,
+    });
+  });
+
+  it('overwrites an existing empower on re-apply (single-slot, last write wins)', () => {
+    const unit = makeUnit({ empower: { magnitude: 10, remainingTicks: 5 } });
+    const log: MatchEvent[] = [];
+
+    applyStatus(unit, 'empower', 30, 25, log, 4);
+
+    expect(unit.empower).toEqual({ magnitude: 25, remainingTicks: 30 });
+  });
 });
 
 describe('tickStatuses', () => {
@@ -195,6 +249,63 @@ describe('tickStatuses', () => {
     });
   });
 
+  it('decrements stun without expiring before remainingTicks hits 0', () => {
+    const unit = makeUnit();
+    const log: MatchEvent[] = [];
+    applyStatus(unit, 'stun', 2, 0, log, 0);
+    log.length = 0;
+
+    tickStatuses(unit, log, 1);
+
+    expect(unit.stun).toEqual({ magnitude: 0, remainingTicks: 1 });
+    expect(log).toHaveLength(0);
+  });
+
+  it('expires stun and emits status-expired when remainingTicks reaches 0', () => {
+    const unit = makeUnit();
+    const log: MatchEvent[] = [];
+    applyStatus(unit, 'stun', 2, 0, log, 0);
+    log.length = 0;
+
+    tickStatuses(unit, log, 1);
+    tickStatuses(unit, log, 2);
+
+    expect(unit.stun).toBeNull();
+    expect(log).toHaveLength(1);
+    expect(log[0]).toEqual({ kind: 'status-expired', tick: 2, targetId: unit.id, status: 'stun' });
+  });
+
+  it('decrements empower without expiring before remainingTicks hits 0', () => {
+    const unit = makeUnit();
+    const log: MatchEvent[] = [];
+    applyStatus(unit, 'empower', 2, 25, log, 0);
+    log.length = 0;
+
+    tickStatuses(unit, log, 1);
+
+    expect(unit.empower).toEqual({ magnitude: 25, remainingTicks: 1 });
+    expect(log).toHaveLength(0);
+  });
+
+  it('expires empower and emits status-expired when remainingTicks reaches 0', () => {
+    const unit = makeUnit();
+    const log: MatchEvent[] = [];
+    applyStatus(unit, 'empower', 2, 25, log, 0);
+    log.length = 0;
+
+    tickStatuses(unit, log, 1);
+    tickStatuses(unit, log, 2);
+
+    expect(unit.empower).toBeNull();
+    expect(log).toHaveLength(1);
+    expect(log[0]).toEqual({
+      kind: 'status-expired',
+      tick: 2,
+      targetId: unit.id,
+      status: 'empower',
+    });
+  });
+
   it('survives dots for exactly N ticks then removes them, leaving hp untouched', () => {
     const unit = makeUnit();
     const log: MatchEvent[] = [];
@@ -218,11 +329,13 @@ describe('tickStatuses', () => {
     expect(unit.hp).toBe(hpBefore);
   });
 
-  it('expires slow, shield, then dots in array order on the same tick', () => {
+  it('expires slow, shield, stun, empower, then dots in array order on the same tick', () => {
     const unit = makeUnit();
     const log: MatchEvent[] = [];
     applyStatus(unit, 'slow', 1, 30, log, 0);
     applyStatus(unit, 'shield', 1, 50, log, 0);
+    applyStatus(unit, 'stun', 1, 0, log, 0);
+    applyStatus(unit, 'empower', 1, 25, log, 0);
     applyStatus(unit, 'dot', 1, 5, log, 0);
     applyStatus(unit, 'dot', 1, 7, log, 0);
     log.length = 0;
@@ -232,6 +345,8 @@ describe('tickStatuses', () => {
     expect(log).toEqual([
       { kind: 'status-expired', tick: 1, targetId: unit.id, status: 'slow' },
       { kind: 'status-expired', tick: 1, targetId: unit.id, status: 'shield' },
+      { kind: 'status-expired', tick: 1, targetId: unit.id, status: 'stun' },
+      { kind: 'status-expired', tick: 1, targetId: unit.id, status: 'empower' },
       { kind: 'status-expired', tick: 1, targetId: unit.id, status: 'dot' },
       { kind: 'status-expired', tick: 1, targetId: unit.id, status: 'dot' },
     ]);

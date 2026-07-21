@@ -51,7 +51,7 @@ describe('createSession', () => {
     const result = frame.result as { winner: string; hash: number };
     expect(result.winner).toBe(expected.winner);
     expect(result.hash).toBe(expected.hash);
-    expect(expected.hash).toBe(1754985129);
+    expect(expected.hash).toBe(805699604);
   });
 
   it('batches multiple envs in a single reset and a single step command', () => {

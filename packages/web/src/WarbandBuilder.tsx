@@ -22,6 +22,7 @@ function createDefaultUnit(): UnitBuild {
     skillIds: [],
     behaviorId: DEFAULT_BEHAVIOR_ID,
     position: { x: 0, y: 0 },
+    augmentIds: [],
   };
 }
 
