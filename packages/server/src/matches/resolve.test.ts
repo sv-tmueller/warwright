@@ -37,6 +37,15 @@ function loadBuild(name: string): Record<string, unknown> {
 const warbandA = loadBuild('warband-a.json');
 const warbandB = loadBuild('warband-b.json');
 
+// resolveMatch stores/returns the PARSED warband, not the raw fixture:
+// WarbandSchema defaults each unit's augmentIds to [] (see core's
+// UnitBuildSchema), so the persisted/returned build carries that field even
+// though the raw fixture predates it.
+function withDefaultAugmentIds(build: Record<string, unknown>): Record<string, unknown> {
+  const units = (build as { units: Array<Record<string, unknown>> }).units;
+  return { ...build, units: units.map((unit) => ({ ...unit, augmentIds: [] })) };
+}
+
 describe.skipIf(!url)('resolveMatch', () => {
   let db: Database;
   let pool: Awaited<ReturnType<typeof createDb>>['pool'];
@@ -113,8 +122,8 @@ describe.skipIf(!url)('resolveMatch', () => {
     expect(row!.userBId).toBe(userBId);
     expect(row!.winner).toBe(result.winner);
     expect(row!.resultHash).toBe(BigInt(result.hash));
-    expect(row!.buildA).toEqual(warbandA);
-    expect(row!.buildB).toEqual(warbandB);
+    expect(row!.buildA).toEqual(withDefaultAugmentIds(warbandA));
+    expect(row!.buildB).toEqual(withDefaultAugmentIds(warbandB));
 
     await app.close();
   });
@@ -180,7 +189,7 @@ describe.skipIf(!url)('resolveMatch', () => {
 
     const [row] = await db.select().from(matches).where(eq(matches.id, matchId));
     expect(row).toBeDefined();
-    expect(row!.buildA).toEqual(warbandA);
+    expect(row!.buildA).toEqual(withDefaultAugmentIds(warbandA));
     expect(row!.buildA).not.toEqual(editedBuild);
 
     await app.close();
