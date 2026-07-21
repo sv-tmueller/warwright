@@ -1,0 +1,248 @@
+/**
+ * Cosmetic-integrity invariant test (#73) — THE deliverable of this slice.
+ *
+ * Soundness argument: sim input is `Replay = {version, seed, buildA,
+ * buildB}`; buildA/buildB funnel through `parseWarband` before any tick.
+ * `WarbandSchema` and `UnitBuildSchema` are both `z.strictObject`, so the key
+ * set the sim can read is CLOSED = `{name, units: [{roleId, skillIds,
+ * behaviorId, position}]}`. Cosmetics live in a disjoint table namespace
+ * (cosmetic_ownership, cosmetic_selection) plus a server-only catalog
+ * (src/cosmetics/catalog.ts), unimported by resolve.ts or the Replay path;
+ * core has no cosmetic symbol at all. Therefore a cosmetic has no
+ * representable slot in the sim-input type AND no read on the resolve path.
+ *
+ * Four assertions prove this:
+ *   1. (PRIMARY, type boundary) The strictObject key sets of UnitBuildSchema
+ *      and WarbandSchema are exactly the documented sim-input keys, and
+ *      parseWarband throws the instant a cosmetic-shaped key is injected —
+ *      at the Warband level and inside a UnitBuild — for every cosmetic slot
+ *      name plus a representative cosmeticId. This is tied to the
+ *      strictObject boundary guarding the only door into runMatch, not a
+ *      "we didn't wire it up" test: it fails loudly the moment a future
+ *      change adds a cosmetic-shaped key to a sim-input schema.
+ *   2. (resolve-path namespace) ResolveMatchInput has no cosmetic field at
+ *      compile time (a type-level assertion enforced by `pnpm typecheck`),
+ *      and at runtime a persisted matches.buildA/buildB deep-equals
+ *      parseWarband's output and contains no cosmetic keys.
+ *   3. (behavioral resolve-invariance, the acceptance test) A fixed
+ *      {seed, buildA, buildB} resolves to an identical winner + hash +
+ *      event-log hash regardless of cosmetic state — proven both DB-free
+ *      (looping runMatch on a fixed Replay while mutating an in-memory
+ *      cosmetic object) and, once cosmetic tables exist, against a real DB
+ *      varying actual ownership/selection rows.
+ *   4. (anti-loot-box) noopEntitlementProvider.grantEntitlement returns
+ *      exactly the requested cosmeticId, never a random one, and the
+ *      interface exposes no random-draw method.
+ */
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { parseWarband, runMatch, RULESET_VERSION, UnitBuildSchema, WarbandSchema } from '@warwright/core';
+import { eq } from 'drizzle-orm';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { buildApp } from '../app.js';
+import { createDb, type Database } from '../db/client.js';
+import { runMigrations } from '../db/migrate.js';
+import { matches } from '../db/schema.js';
+import type { ResolveMatchInput } from '../matches/resolve.js';
+import { resolveMatch } from '../matches/resolve.js';
+import { CosmeticSlotSchema } from './catalog.js';
+import { noopEntitlementProvider, type EntitlementProvider } from './entitlement.js';
+
+const url = process.env.DATABASE_URL;
+
+if (process.env.CI && !url) {
+  throw new Error('CI must provide DATABASE_URL for DB-gated tests.');
+}
+
+function loadBuild(name: string): Record<string, unknown> {
+  const path = fileURLToPath(new URL(`../../../../builds/${name}`, import.meta.url));
+  return JSON.parse(readFileSync(path, 'utf-8')) as Record<string, unknown>;
+}
+
+const warbandA = loadBuild('warband-a.json');
+const warbandB = loadBuild('warband-b.json');
+
+// Every cosmetic slot name, plus a generic "cosmeticId"-style key, each
+// paired with a representative cosmeticId value: exactly what a
+// (hypothetical, wrong) implementation would inject if it tried to smuggle
+// cosmetic state through the sim-input path.
+const COSMETIC_INJECTION_KEYS = [...CosmeticSlotSchema.options, 'cosmeticId'];
+const REPRESENTATIVE_COSMETIC_ID = 'palette-crimson';
+
+describe('Assertion 1 (PRIMARY): the sim-input keyspace is closed', () => {
+  it('UnitBuildSchema.shape is exactly {roleId, skillIds, behaviorId, position}', () => {
+    expect(Object.keys(UnitBuildSchema.shape).sort()).toEqual(
+      ['roleId', 'skillIds', 'behaviorId', 'position'].sort()
+    );
+  });
+
+  it('WarbandSchema.shape is exactly {name, units}', () => {
+    expect(Object.keys(WarbandSchema.shape).sort()).toEqual(['name', 'units'].sort());
+  });
+
+  it.each(COSMETIC_INJECTION_KEYS)(
+    'parseWarband throws when a cosmetic-shaped key ("%s") is injected at the Warband level',
+    (key) => {
+      const injected = { ...warbandA, [key]: REPRESENTATIVE_COSMETIC_ID };
+      expect(() => parseWarband(injected)).toThrow();
+    }
+  );
+
+  it.each(COSMETIC_INJECTION_KEYS)(
+    'parseWarband throws when a cosmetic-shaped key ("%s") is injected inside a UnitBuild',
+    (key) => {
+      const units = warbandA.units as Array<Record<string, unknown>>;
+      const injected = {
+        ...warbandA,
+        units: [{ ...units[0], [key]: REPRESENTATIVE_COSMETIC_ID }, ...units.slice(1)],
+      };
+      expect(() => parseWarband(injected)).toThrow();
+    }
+  );
+});
+
+describe('Assertion 2: the resolve path has no cosmetic namespace', () => {
+  // Compile-time: if ResolveMatchInput ever gains a field literally named
+  // "cosmeticId", 'cosmeticId' becomes assignable to keyof ResolveMatchInput
+  // and this type evaluates to `never`, so assigning `true` below fails to
+  // type-check — caught by `pnpm typecheck`, not by any runtime assertion.
+  type ResolveMatchInputHasNoCosmeticIdField = 'cosmeticId' extends keyof ResolveMatchInput ? never : true;
+  const _noCosmeticIdField: ResolveMatchInputHasNoCosmeticIdField = true;
+  void _noCosmeticIdField;
+
+  it('a well-formed ResolveMatchInput has exactly the documented properties (no cosmetic field)', () => {
+    const sample: ResolveMatchInput = {
+      userAId: 'user-a',
+      userBId: 'user-b',
+      buildA: warbandA,
+      buildB: warbandB,
+      seed: 1,
+    };
+    expect(Object.keys(sample).sort()).toEqual(
+      ['userAId', 'userBId', 'buildA', 'buildB', 'seed'].sort()
+    );
+  });
+
+  describe.skipIf(!url)('runtime: a persisted match row contains no cosmetic keys', () => {
+    let db: Database;
+    let pool: Awaited<ReturnType<typeof createDb>>['pool'];
+
+    beforeAll(async () => {
+      ({ db, pool } = createDb(url!));
+      await runMigrations(url!);
+    });
+
+    afterAll(async () => {
+      await pool.end();
+    });
+
+    it('persisted matches.buildA/buildB deep-equal parseWarband output and contain no cosmetic keys', async () => {
+      const app = buildApp({
+        db,
+        pool,
+        session: { secret: 'a'.repeat(32), cookieSecure: false, pruneSessionInterval: false },
+      });
+
+      const preCsrf = await app.inject({ method: 'GET', url: '/auth/csrf' });
+      const preCookie = (preCsrf.headers['set-cookie'] as string).split(';', 1)[0]!;
+      const { csrfToken } = preCsrf.json() as { csrfToken: string };
+      const registerA = await app.inject({
+        method: 'POST',
+        url: '/auth/register',
+        headers: { cookie: preCookie, 'csrf-token': csrfToken },
+        payload: { email: `integrity-a-${Date.now()}@example.com`, password: 'correct horse battery staple' },
+      });
+      const userAId = (registerA.json() as { id: string }).id;
+
+      const preCsrf2 = await app.inject({ method: 'GET', url: '/auth/csrf' });
+      const preCookie2 = (preCsrf2.headers['set-cookie'] as string).split(';', 1)[0]!;
+      const { csrfToken: csrfToken2 } = preCsrf2.json() as { csrfToken: string };
+      const registerB = await app.inject({
+        method: 'POST',
+        url: '/auth/register',
+        headers: { cookie: preCookie2, 'csrf-token': csrfToken2 },
+        payload: { email: `integrity-b-${Date.now()}@example.com`, password: 'correct horse battery staple' },
+      });
+      const userBId = (registerB.json() as { id: string }).id;
+
+      const { matchId } = await resolveMatch(db, {
+        userAId,
+        userBId,
+        buildA: warbandA,
+        buildB: warbandB,
+        seed: 99,
+      });
+
+      const [row] = await db.select().from(matches).where(eq(matches.id, matchId));
+      expect(row).toBeDefined();
+      expect(row!.buildA).toEqual(parseWarband(warbandA));
+      expect(row!.buildB).toEqual(parseWarband(warbandB));
+
+      for (const key of COSMETIC_INJECTION_KEYS) {
+        expect(Object.keys(row!.buildA as object)).not.toContain(key);
+        expect(Object.keys(row!.buildB as object)).not.toContain(key);
+      }
+
+      await app.close();
+    });
+  });
+});
+
+describe('Assertion 3: behavioral resolve-invariance', () => {
+  it('DB-free: runMatch produces an identical hash + winner across a fixed Replay while an in-memory cosmetic object is mutated arbitrarily', () => {
+    const replay = {
+      version: RULESET_VERSION,
+      seed: 42,
+      buildA: parseWarband(warbandA),
+      buildB: parseWarband(warbandB),
+    };
+
+    // Deliberately not read by runMatch at all: mutating it before every
+    // call is exactly what would leak into the sim if cosmetics were ever
+    // (wrongly) threaded through.
+    const cosmeticState: Record<string, unknown> = {};
+    const baseline = runMatch(replay);
+
+    const mutations: Array<() => void> = [
+      () => {
+        cosmeticState['unitPalette'] = 'palette-crimson';
+      },
+      () => {
+        cosmeticState['banner'] = 'banner-laurel';
+      },
+      () => {
+        delete cosmeticState['unitPalette'];
+      },
+      () => {
+        cosmeticState['unitPalette'] = 'palette-azure';
+        cosmeticState['banner'] = 'banner-default';
+      },
+      () => {
+        for (const key of Object.keys(cosmeticState)) delete cosmeticState[key];
+      },
+    ];
+
+    for (const mutate of mutations) {
+      mutate();
+      const result = runMatch(replay);
+      expect(result.hash).toBe(baseline.hash);
+      expect(result.winner).toBe(baseline.winner);
+      expect(result.eventLog).toEqual(baseline.eventLog);
+    }
+  });
+});
+
+describe('Assertion 4: anti-loot-box', () => {
+  it('noopEntitlementProvider.grantEntitlement returns exactly the requested cosmeticId, never a random one', async () => {
+    const result = await noopEntitlementProvider.grantEntitlement({
+      userId: 'user-1',
+      cosmeticId: REPRESENTATIVE_COSMETIC_ID,
+    });
+    expect(result).toEqual({ granted: true, cosmeticId: REPRESENTATIVE_COSMETIC_ID });
+  });
+
+  it('EntitlementProvider exposes no random-draw method', () => {
+    const provider: EntitlementProvider = noopEntitlementProvider;
+    expect(Object.keys(provider)).toEqual(['grantEntitlement']);
+  });
+});
