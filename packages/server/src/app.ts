@@ -7,6 +7,8 @@ import {
 } from 'fastify-type-provider-zod';
 import type { Pool } from 'pg';
 import authRoutes from './auth/routes.js';
+import { noopEntitlementProvider, type EntitlementProvider } from './cosmetics/entitlement.js';
+import cosmeticRoutes from './cosmetics/routes.js';
 import type { Database } from './db/client.js';
 import matchRoutes from './matches/routes.js';
 import sessionPlugin from './plugins/session.js';
@@ -34,6 +36,8 @@ export interface BuildAppOptions {
   session?: SessionConfig;
   /** Optional matchmaking-queue batching config (window/K/scheduler); see queue/routes.ts's QueueConfig. Omitted fields fall back to createQueueService's own defaults. */
   queue?: QueueConfig;
+  /** Optional entitlement provider for /cosmetics/acquire; defaults to noopEntitlementProvider (see cosmetics/entitlement.ts). */
+  entitlementProvider?: EntitlementProvider;
 }
 
 /**
@@ -42,10 +46,10 @@ export interface BuildAppOptions {
  * test.ts). /healthz is deliberately DB-free so the boot smoke test never
  * depends on Postgres being up; /readyz is DB-gated (SELECT 1) and only
  * registered when a database is supplied. The session/CSRF plugin and the
- * /auth/*, /warbands*, /queue, and /leaderboard routes are only registered
- * when db, pool, and session are all supplied, mirroring /readyz's
- * DB-free-test gating. /matches* joins that same block, mirroring queue's
- * and rating's registration.
+ * /auth/*, /warbands*, /cosmetics*, /queue, and /leaderboard routes are only
+ * registered when db, pool, and session are all supplied, mirroring
+ * /readyz's DB-free-test gating. /matches* joins that same block, mirroring
+ * queue's and rating's registration.
  */
 export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   const app = Fastify({ bodyLimit: BODY_LIMIT_BYTES }).withTypeProvider<ZodTypeProvider>();
@@ -73,6 +77,10 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     });
     void app.register(authRoutes, { db });
     void app.register(warbandRoutes, { db });
+    void app.register(cosmeticRoutes, {
+      db,
+      entitlementProvider: options.entitlementProvider ?? noopEntitlementProvider,
+    });
     void app.register(queueRoutes, { db, queue: options.queue });
     void app.register(ratingRoutes, { db });
     void app.register(matchRoutes, { db });
