@@ -17,14 +17,13 @@ import { skills as skillCatalog } from '../content/data/skills.js';
 import type { Action } from './behavior.js';
 import type { Unit, WorldState } from './types.js';
 
-export const OBS_ENCODING_VERSION = 1;
+export const OBS_ENCODING_VERSION = 2;
 
 // Sentinel written into a self-block skill-cooldown slot when the unit does
 // not have that catalog skill equipped. Ticks are always >= 0, so -1 can
-// never collide with a real cooldown value. Exported so
-// content/behaviors/policy/featurize.ts (the TS mirror of
-// gym/warwright_gym/featurize.py) can special-case it without a duplicated
-// magic number.
+// never collide with a real cooldown value. Exported so a future exported
+// inference Behavior's TS featurizer (mirroring gym/warwright_gym/
+// featurize.py) can special-case it without a duplicated magic number.
 export const SKILL_COOLDOWN_ABSENT = -1;
 
 // --- Self block (one per encodeObservation call) -------------------------
@@ -139,9 +138,10 @@ export function encodeObservation(world: WorldState, unitId: number): number[] {
 //   cast:         [4, targetId, 0,    skillIndex]  (skillIndex: skill
 //                                                    catalog position, see
 //                                                    skillCatalog above)
-// Exported so content/behaviors/policy/policy-smoke-v1.ts (the exported
-// inference Behavior) can build a wire action tuple from an inferred
-// component kind without a duplicated magic-number table.
+// Exported so a future exported inference Behavior (weights + pure-TS
+// float64 inference, see CLAUDE.md's "Content, learned behaviors, and
+// cosmetics") can build a wire action tuple from an inferred component
+// kind without a duplicated magic-number table.
 export const ACTION_KIND_IDLE = 0;
 export const ACTION_KIND_MOVE = 1;
 export const ACTION_KIND_MOVE_TOWARD = 2;

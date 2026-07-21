@@ -13,7 +13,7 @@ function manifestWith(id: string, shape: 'general' | '1v1') {
 }
 
 const generalManifest = manifestWith('sample-aggro', 'general');
-const oneVOneManifest = manifestWith('sample-policy', '1v1');
+const oneVOneManifest = manifestWith('baseline-1v1-check', '1v1');
 
 describe('GATE_GENERAL_BASELINE_BEHAVIOR_ID', () => {
   it('is a defined, non-empty, gate-chosen Behavior id', () => {

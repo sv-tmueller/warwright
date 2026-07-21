@@ -1,9 +1,4 @@
-import {
-  aggroLowestHp,
-  focusCasters,
-  policySmokeV1,
-  protectAllies,
-} from './content/behaviors/index.js';
+import { aggroLowestHp, focusCasters, protectAllies } from './content/behaviors/index.js';
 
 export { runMatch } from './sim/match.js';
 export type { MatchResult, RunMatch, Winner, WorldState } from './sim/types.js';
@@ -29,27 +24,11 @@ export { roles } from './content/data/roles.js';
 export { skills } from './content/data/skills.js';
 export { augments } from './content/data/augments.js';
 
-// The exported #66a/#66b policy-smoke-v1 Behavior (weights + pure-TS
-// float64 inference; see policy-smoke-v1.ts), re-exported by NAME
-// (deliberately not part of the `behaviorIds` id-only enumeration below,
-// which stays ids-only for content-selection clients like the web
-// builder). This is the one Behavior OBJECT the public API exposes: an
-// exported-policy foundry submission (packages/foundry/submissions/
-// sample-policy) needs the actual `decide` function to reuse it under its
-// own new Behavior id, since a submission can only import '@warwright/core'
-// (see packages/foundry/src/purity.ts's import allowlist) -- it cannot
-// reach into core's internals to get the trained weights + inference logic
-// any other way.
-export { policySmokeV1 } from './content/behaviors/index.js';
-
 // Public content enumeration for clients that build Warbands (the web
 // builder), so they can only offer choices core actually recognizes. Ids
-// only, not the Behavior objects themselves (decide() stays internal) --
-// `policySmokeV1` above is the sole, deliberate exception, for the reason
-// documented there.
-export const behaviorIds = [
-  aggroLowestHp.id,
-  protectAllies.id,
-  focusCasters.id,
-  policySmokeV1.id,
-] as const;
+// only, not the Behavior objects themselves (decide() stays internal): no
+// seed Behavior is currently exposed as an object across this boundary.
+// (A future exported inference Behavior -- weights + pure-TS float64
+// inference, see CLAUDE.md's "Content, learned behaviors, and cosmetics"
+// -- may need a similar by-name Behavior-object export again; see #153.)
+export const behaviorIds = [aggroLowestHp.id, protectAllies.id, focusCasters.id] as const;

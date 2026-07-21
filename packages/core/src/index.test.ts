@@ -3,7 +3,6 @@ import {
   behaviorIds,
   createSteppedMatch,
   EXTERNAL_BEHAVIOR_ID,
-  policySmokeV1,
   roles,
   skills,
 } from './index.js';
@@ -32,16 +31,15 @@ describe('@warwright/core', () => {
       'frost-bolt',
       'venom-shot',
       'mending-touch',
+      'piercing-shot',
+      'battle-cry',
+      'crippling-strike',
+      'rally',
     ]);
   });
 
   it('exposes the seed behavior id enumeration', () => {
-    expect(behaviorIds).toEqual([
-      'aggro-lowest-hp',
-      'protect-allies',
-      'focus-casters',
-      'policy-smoke-v1',
-    ]);
+    expect(behaviorIds).toEqual(['aggro-lowest-hp', 'protect-allies', 'focus-casters']);
   });
 
   it('excludes the external sentinel from the public behaviorIds enumeration', () => {
@@ -51,10 +49,5 @@ describe('@warwright/core', () => {
   it('exposes the external sentinel id and the stepped-match factory', () => {
     expect(EXTERNAL_BEHAVIOR_ID).toBe('external');
     expect(typeof createSteppedMatch).toBe('function');
-  });
-
-  it('exposes the policySmokeV1 Behavior so an exported-policy submission can reuse it under a new id', () => {
-    expect(policySmokeV1.id).toBe('policy-smoke-v1');
-    expect(typeof policySmokeV1.decide).toBe('function');
   });
 });

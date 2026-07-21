@@ -13,6 +13,10 @@ const SKILL_IDS = [
   'frost-bolt',
   'venom-shot',
   'mending-touch',
+  'piercing-shot',
+  'battle-cry',
+  'crippling-strike',
+  'rally',
 ] as const;
 const STATUS_KINDS = ['slow', 'shield', 'dot'] as const;
 

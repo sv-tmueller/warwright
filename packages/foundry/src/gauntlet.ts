@@ -68,8 +68,8 @@ function submissionWarband(manifest: SubmissionManifest): Warband {
  * (mirrored-sides evaluation is a documented future extension, since a
  * policy Behavior can be position-specific).
  *
- * If a `decide()` throws during any seed's match -- most commonly a policy
- * Behavior's own roster-shape/obsDim check (see policy-smoke-v1.ts) when
+ * If a `decide()` throws during any seed's match -- most commonly an
+ * exported-policy Behavior's own roster-shape/obsDim check when
  * the submission's declared `shape` does not match the roster it actually
  * gets -- this throws a Stage-3-tagged error wrapping the underlying cause,
  * so the failure surfaces as a clearly-attributed stage-3 rejection instead

@@ -36,8 +36,8 @@ export const SubmissionBuildSchema = UnitBuildSchema.omit({ behaviorId: true });
 // its hard-coded builds/policy-1v1-b.json load), never submission-chosen.
 // An earlier revision let a submission's own manifest pick its gauntlet
 // opponent's Behavior id via this field; besides letting a submitter choose
-// an opponent it knows it can beat, a legal-looking value like
-// 'policy-smoke-v1' made the GATE-side baseline unit itself throw an
+// an opponent it knows it can beat, a legal-looking value naming an
+// exported-policy Behavior made the GATE-side baseline unit itself throw an
 // obsDim-mismatch error, which the gauntlet then misattributed to the
 // submission's own decide() (Fix 1, review of PR #137). `strictObject`
 // rejects any manifest.json that still declares `baseline` outright, so a

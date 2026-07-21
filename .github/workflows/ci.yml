@@ -40,7 +40,6 @@ jobs:
       # already proven by the foundry vitest suite above (packages/foundry/
       # src/validate.test.ts + cli-e2e.test.ts), which pnpm -r test just ran.
       - run: pnpm foundry:validate packages/foundry/submissions/sample-aggro
-      - run: pnpm foundry:validate packages/foundry/submissions/sample-policy
 
       - run: pnpm build
 

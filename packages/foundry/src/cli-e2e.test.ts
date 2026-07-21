@@ -28,10 +28,9 @@ function runCli(dir: string): CliRun {
 // Only sample-aggro (rule-based) exercises the CLI's success path here.
 // cli.ts is submission-agnostic wiring -- it calls validateSubmission()
 // and formats whatever ValidateReport comes back, with no policy-specific
-// branch -- so it doesn't need its own full 25-seed exported-policy proof
-// on top of validate.test.ts's canonical sample-policy case (which already
-// proves the same production stage-3 gate, in-process, without paying a
-// second real-CLI-process's worth of spawn + full-gauntlet cost here too).
+// branch -- so a second real-CLI-process's worth of spawn + full-gauntlet
+// cost for an exported-policy submission would add no coverage beyond
+// what this already proves for the production stage-3 gate, in-process.
 describe('foundry validate CLI (end to end)', () => {
   it('exits 0 for the valid submission sample-aggro', () => {
     const result = runCli('packages/foundry/submissions/sample-aggro');

@@ -62,8 +62,8 @@ describe('seed roles', () => {
 });
 
 describe('seed skills', () => {
-  it('has exactly 6 skills', () => {
-    expect(skills.length).toBe(6);
+  it('has exactly 10 skills', () => {
+    expect(skills.length).toBe(10);
   });
 
   it('parses every skill', () => {
@@ -79,19 +79,13 @@ describe('seed skills', () => {
     }
   });
 
-  it('covers every status kind that has seed-skill content', () => {
-    // 'stun' and 'empower' are engine primitives added in Slice A (#147);
-    // no seed Skill uses them yet -- their content (Crippling Strike/Rally)
-    // lands in Slice C (#149)/Slice D (#150).
+  it('covers every status kind (Slice C added Crippling Strike/stun and Rally/empower)', () => {
     const statuses = new Set(
       skills
         .filter((s) => s.effect.kind === 'apply-status')
         .map((s) => (s.effect as { status: (typeof STATUS_KINDS)[number] }).status),
     );
-    const contentCoveredStatusKinds = STATUS_KINDS.filter(
-      (status) => status !== 'stun' && status !== 'empower',
-    );
-    for (const status of contentCoveredStatusKinds) {
+    for (const status of STATUS_KINDS) {
       expect(statuses.has(status)).toBe(true);
     }
   });
