@@ -223,6 +223,25 @@ a version number.
    - `packages/core/src/content/behaviors/policy/inference-parity.fixture.json` — the TS-side inference
      parity fixture, captured against v1 observations; stale under v2 and removed/deprecated alongside the
      weights.
+   - `gym/tests/test_inference_parity_fixture.py` — the Python-side sync test between the two committed
+     TS-side artifacts above (mirrors `test_protocol_golden.py`'s discipline, direction reversed): every one
+     of its five tests calls a loader that raises `AssertionError` if `policy-smoke-v1.weights.json` or
+     `inference-parity.fixture.json` is missing, so deleting those two artifacts (as this section already
+     prescribes) turns this test red, not silently skipped or removed on its own. Missing from the round-2
+     ledger; the quarantine plan must retire this test alongside the two artifacts it asserts on (or repoint
+     it at a v2-trained replacement, if the recommended follow-up spike ever produces one).
+   - **The rest of `packages/core/src/content/behaviors/policy/`.** The round-2 ledger named the two
+     committed data artifacts above but not the TypeScript modules that load and test them:
+     `weights-schema.ts` (home of the `obsEncodingVersion` pin discussed below), `policy-smoke-v1.ts` (the
+     Behavior itself), and `inference.ts` (its forward-pass math) become unreachable dead code once the
+     barrel stops re-exporting `policySmokeV1` — but their three dedicated test files,
+     `weights-schema.test.ts`, `policy-smoke-v1.test.ts`, and `inference-parity.test.ts`, import those
+     modules **directly**, bypassing the barrel entirely, so they keep loading (and re-triggering
+     `weights-schema.ts:86`'s module-load throw against a now-missing or stale weights file) even after the
+     barrel export is gone. All three test files must be quarantined alongside the two data artifacts; the
+     three implementation modules can be deleted in the same commit or left as genuinely unreferenced dead
+     code pending the recommended re-export follow-up — either is consistent with Option 1's "quarantine ...
+     or delete" framing below, but the test files are not optional to leave behind.
    - `gym/tests/fixtures/protocol_golden.json` — the gym-side protocol fixture; regenerated via `pnpm
      --filter @warwright/gym-bridge gen-fixture` once the full 10-entry catalog exists.
    - `gym/warwright_gym/actions.py` — its `SKILL_CATALOG` list (must gain the 4 new skill ids, in catalog
@@ -239,6 +258,14 @@ a version number.
      here**: both consume `behaviorIds` by reuse (the same "defaulted/derived field propagates automatically"
      reasoning as Slice E's `augmentIds` correction below), so the id simply disappears from validation and
      the builder UI once removed from the array.
+   - `packages/core/src/index.test.ts` — missing from the round-2 ledger; hard-asserts the exact literal
+     `behaviorIds` array, including `'policy-smoke-v1'` as its fourth and last entry
+     (`expect(behaviorIds).toEqual([... 'policy-smoke-v1'])`, ~:32-37), and separately asserts
+     `policySmokeV1.id === 'policy-smoke-v1'` and `typeof policySmokeV1.decide === 'function'` (~:49-51) via
+     a named import from `./index.js` at the top of the file. Both assertions break the moment `index.ts:42`'s
+     export and `:49-54`'s `behaviorIds` entry above are removed — this is a direct, breaking consumer of
+     exactly the two exports this section already discusses; the array literal needs trimming to the
+     remaining three ids and the `policySmokeV1` import/assertion block needs deleting in the same commit.
    - **Already-stored server warbands.** `BehaviorIdSchema` is a bare `z.string().min(1)` (not an enum), and
      `findUnknownContentId` (the only place `behaviorIds` gates a behaviorId) runs only in the POST and PUT
      handlers, not GET — so an existing row with `behaviorId: "policy-smoke-v1"` stays readable via GET
@@ -257,13 +284,30 @@ a version number.
    - `packages/core/src/sim/seed-registry.ts:30` — `createSeedRegistryWith` unconditionally registers
      `policySmokeV1` into every match's Behavior registry (the shared assembly `init.ts`/`match.ts` both use,
      so `runMatch` and `createSteppedMatch` cannot diverge); the registration line is removed.
+   - `packages/core/src/sim/seed-registry.test.ts` — missing from the round-2 ledger; found by this round's
+     reverse grep. Asserts `registry.getBehavior('policy-smoke-v1').id === 'policy-smoke-v1'` in two separate
+     tests (one for `createSeedRegistry()`, one for `createSeedRegistryWith([])`), both of which would throw
+     `Unknown behavior id: policy-smoke-v1` the moment the registration line above is removed; both
+     assertions need deleting in the same commit.
    - `packages/core/src/content/behaviors/index.ts` (the registered-Behaviors barrel) drops its
      `policySmokeV1` re-export; `packages/core/src/content/behaviors/index.test.ts`'s two assertions on
      `policySmokeV1.id` and its registration are removed or repointed at the remaining three Behaviors.
    - `packages/core/src/sim/policy-smoke-v1-match.test.ts` (the dedicated full-`runMatch` integration
-     coverage for this Behavior) plus its demo build fixtures, `builds/policy-1v1-a.json` and
-     `builds/policy-1v1-b.json` (both reference `"behaviorId": "policy-smoke-v1"`) — all three are removed
-     together, since the test would otherwise fail the moment the registration above is gone.
+     coverage for this Behavior) plus its `buildA` demo fixture, `builds/policy-1v1-a.json` (references
+     `"behaviorId": "policy-smoke-v1"`) — both removed together, since the test would otherwise fail the
+     moment the registration above is gone. **`builds/policy-1v1-b.json` is NOT removed.** A previous draft
+     of this ledger wrongly claimed both files referenced the policy; checked directly (`cat
+     builds/policy-1v1-b.json`), `-b.json` declares `"behaviorId": "aggro-lowest-hp"` on a `warden`, not
+     `policy-smoke-v1` — the doc's own quote of `stage3.ts:11` two paragraphs below ("policy-1v1-b/warden/
+     aggro-lowest-hp") already said as much and this entry contradicted it. `-b.json` survives as
+     independent, permanent foundry infrastructure, unrelated to `policySmokeV1`'s own registration:
+     `packages/foundry/src/baseline.ts:23` loads it directly and unconditionally at module load as
+     `POLICY_1V1_BASELINE`, the GATE-pinned baseline warband every `'1v1'`-shape gauntlet submission is
+     scored against (see `baseline.ts:43-58`), consumed by `packages/foundry/src/stage3.ts`'s threshold
+     calibration and by every foundry test that exercises a `'1v1'`-shape submission (not just
+     `sample-policy`). Retiring `policySmokeV1` removes `-b.json`'s *other* consumer — this match-integration
+     test, which used it as `buildB`, the demo opponent — but leaves `baseline.ts`'s independent load intact,
+     so the file stays.
    - **The entire foundry surface.** `packages/foundry/submissions/sample-policy/behavior.ts:16,20` imports
      `policySmokeV1` from `@warwright/core` by name (`import { policySmokeV1 } from '@warwright/core'`) to
      wrap its `decide` under a new submission id — the one deliberate consumer `index.ts:42`'s export exists
@@ -310,30 +354,63 @@ surface including its per-push CI gate):
   still means folding a full PPO training round-trip (`gym/`, `export_policy.py`, a new parity fixture) into
   a batch whose actual job is landing content-catalog data — the scope-creep risk already identified stands,
   now weighed against the wider ledger rather than assumed.
-- **Option 3 — a frozen v1-encoder shim (raised by round-1 review; evaluated, not selected).** The idea:
-  pin `policySmokeV1`'s own inference to a version-frozen observation encoding, independent of the live,
-  growing `OBS_ENCODING_VERSION`, so its weights, its tests, and the foundry submission never need to change
-  at all, no matter how large the skill catalog grows later. Checked against the actual code: `Behavior.decide`
-  (`sim/behavior.ts`) only ever receives a `WorldView`, the seam that intentionally hides all engine
-  internals from Behaviors; `policySmokeV1`'s own `decide` (`policy-smoke-v1.ts`) calls `world.observationOf
-  (self)`, which is bound to the live, catalog-derived `OBS_SELF_FIELD_COUNT`/`OBS_UNIT_FIELD_COUNT`, not a
-  per-policy pinned version, and `weights-schema.ts`'s validation is written against one global "current"
-  `OBS_ENCODING_VERSION`, not a per-policy pinned one. Making any policy durable across future catalog growth
-  this way needs a new, first-class "multiple observation-encoder versions coexist at runtime" capability on
-  the `WorldView`/`Behavior` seam — a genuine change to the sim's public contract, unscoped by this spike's
-  sub-plan, and risk-bearing precisely because it touches the same `observation.ts` contract this document's
-  own guardrail calls "the parity ground truth for every future exported policy." It is a real, appealing
-  answer to the *general, recurring* problem (every future content batch that grows the catalog will
-  re-trigger this same choice for whatever policies are live then) — this document recommends it be raised
-  as its own follow-up spike ("should exported policies be encoder-version-pinned so catalog growth never
-  retires them?"), not adopted ad hoc inside a content-scope batch. Folding a new engine capability into a
-  docs-only recommendation about content sizing would itself be the kind of unpriced scope-creep the #139
-  guardrail exists to prevent.
+- **Option 3 — a frozen v1-encoder shim (raised by round-1 review; re-evaluated this round on corrected
+  grounds, still not selected).** The idea: keep `policySmokeV1` running across catalog growth by making its
+  own inference immune to the live, growing `OBS_ENCODING_VERSION`. **A previous draft of this analysis
+  rejected the idea for the wrong reason** — it claimed the blocker was `Behavior`'s public contract and that
+  a shim would need "a genuine change to the sim's public contract." Checked again, directly against the
+  code: `Behavior.decide` (`sim/behavior.ts`) places no constraint at all on how a Behavior interprets the
+  vector `WorldView.observationOf` hands it — it is typed `readonly number[]`, full stop; nothing in
+  `behavior.ts` requires a Behavior to consume it at the live-current length or layout. **The actual gate is
+  private, not public**: `weights-schema.ts:73`'s `parsePolicyWeights` throws unless `weights.obsEncodingVersion
+  === OBS_ENCODING_VERSION` — a strict equality check against one *global* "current" version, written for the
+  general exported-policy loading path, and reached only because `policy-smoke-v1.ts` calls
+  `world.observationOf(self)` and hands the live-shaped result straight to inference with no translation step
+  of its own.
+  A concrete no-public-contract-change path therefore exists. `observation.ts`'s self-block is documented as
+  build-independent, and its skill-cooldown slots are appended in fixed catalog order
+  (`OBS_SELF_SKILL_COOLDOWN_START_INDEX = 5`, `OBS_SELF_FIELD_COUNT = 5 + skillCatalog.length`), so this
+  batch's catalog growth is purely **tail-additive** — the 4 new Skills are new rows appended to `skills.ts`,
+  never inserted before or reordering the existing 6 (see the batch-as-a-whole analysis above). That means
+  the pinned v1 weights' own 17-dim observation (`obsDim: 17` in the committed weights JSON — an 11-field
+  self-block, indices 0-10, plus one 6-field per-unit block for its trained 0-ally/1-enemy roster) has an
+  11-field self-block that is exactly a **prefix slice** of the live, growing self-block: indices 0-10 stay
+  byte-for-byte the same slots before and after the batch, only indices 11+ are new. A
+  `policySmokeV1`-private downcast — reslice the live observation to indices `[0, 11)`, concatenated with the
+  live per-unit block(s) (their own layout is independent of skill-catalog size and starts right after the
+  self-block regardless of the self-block's length) — inside `policy-smoke-v1.ts` itself, plus relaxing
+  `weights-schema.ts:73`'s check from a global equality to something that accepts this one pinned legacy
+  version and routes it through the reslice instead of throwing, would keep `policySmokeV1` loading and
+  running under `OBS_ENCODING_VERSION = 2` with **zero** change to `Behavior`, `WorldView`, or any other
+  public seam. This is real, and the previous draft's public-contract claim does not hold against the code.
+  **Re-decided on honest grounds: still not selected, but as a cost judgment, not a "no path exists" claim.**
+  The shim's true cost is not the one-time reslice-plus-relaxed-check, which is genuinely small (on the order
+  of a dozen lines). It is that catalog growth is only *one* of the layout changes `observation.ts`'s own
+  header calls breaking — "field order, field count, the action tag table" — and the prefix-slice property
+  this shim leans on holds only because *this* batch happens to be tail-additive. Nothing enforces that
+  invariant for every future batch: a later change that inserts a field ahead of the skill-cooldown slots,
+  reorders the self-block, or reshapes the per-unit block breaks the prefix assumption silently, and the shim
+  would need bespoke, hand-written compensating code re-derived from scratch for that specific layout change
+  — for as long as `policySmokeV1` is kept alive. That is a permanent, open-ended maintenance tax on every
+  future encoder change, paid to keep running a #66a/#66b **smoke/demo artifact that ships zero gameplay
+  value** (a lone reaver+cleave agent trained against a lone warden, never intended as real roster content),
+  when the alternative already exists and is cheap to invoke *only when actually wanted*: `gym/EXPORT.md`'s
+  documented re-export pipeline can produce a fresh, fully-compatible v2 artifact at any later point, with no
+  standing shim to maintain in the meantime. Deprecating now and re-exporting later (if ever) costs strictly
+  less than building and then indefinitely maintaining a shim for a demo artifact nobody currently plays.
+  This document still recommends raising the *general* question — "should exported policies be
+  encoder-version-pinned so catalog growth never retires them?" — as its own follow-up spike (a real,
+  first-class per-policy-pinned-encoder capability is a legitimate answer to that general, recurring problem
+  across many future policies), rather than building a one-off, catalog-growth-only version of it inline here
+  to save this one smoke artifact.
 
-**Conclusion: the recommendation does not change.** Deprecate/unregister `policySmokeV1` in the same commit
-as the encoder bump (Slice G, co-landed with Slice C), now priced against the full ledger above, with the
-already-stored-warband caveat and the temporary Phase 3 DoD evidence gap both named explicitly and a tracked
-follow-up issue recommended for a v2-trained replacement sample submission.
+**Conclusion: the recommendation does not change, though this round corrects why.** Deprecate/unregister
+`policySmokeV1` in the same commit as the encoder bump (Slice G, co-landed with Slice C), now priced against
+the full ledger above and re-argued against Option 3's honest cost (a real, cheaper-than-previously-claimed
+shim, rejected on open-ended maintenance-burden grounds rather than a false "no path exists without touching
+the public contract" claim), with the already-stored-warband caveat and the temporary Phase 3 DoD evidence
+gap both named explicitly and a tracked follow-up issue recommended for a v2-trained replacement sample
+submission.
 
 ### Derived #70 split (S/M slices)
 
@@ -361,6 +438,24 @@ free; Slice E is now round-trip/serialization verification instead of a schema e
 `policySmokeV1` deprecation's true blast radius (see the full ledger and re-argued recommendation above) is
 large enough to earn its own slice, G, rather than being an implicit footnote inside Slice C.
 
+**Further corrected in this round (tester round 3, PR #140).** Three more corrections, from a fresh
+fact-check of the ledger rather than new scope: (1) the ledger's claim that both `builds/policy-1v1-a.json`
+and `-b.json` reference `policy-smoke-v1` was factually wrong — checked directly, only `-a.json` does;
+`-b.json` declares `aggro-lowest-hp`/warden and is **kept, not removed**, since `packages/foundry/src/
+baseline.ts` depends on it independently as the fixed `'1v1'`-shape gauntlet baseline, unrelated to
+`policySmokeV1`'s own registration (see the corrected ledger entry above); (2) a fresh reverse grep
+(`grep -rn "policySmokeV1\|policy-smoke-v1" packages/ builds/ gym/ .github/ | grep -v docs/`) found real
+consumers missing from the round-2 ledger — `packages/core/src/index.test.ts`, `packages/core/src/sim/
+seed-registry.test.ts`, `gym/tests/test_inference_parity_fixture.py`, and the dedicated implementation/test
+modules under `content/behaviors/policy/` that bypass the barrel — all now listed in the full ledger above
+and folded into Slice G's scope below; (3) the Option-3 (frozen-encoder shim) rejection was re-argued: its
+previous "would need a genuine change to the sim's public contract" justification was checked against the
+code and found false (`Behavior.decide` places no such constraint on how a Behavior reads the observation
+vector; the actual gate is private to `weights-schema.ts:73`), so the rejection is now argued on the shim's
+honest, open-ended maintenance-burden cost instead of a blocker that does not exist — see the rewritten
+Option 3 analysis above. The bottom-line recommendation (deprecate/unregister) is unchanged by any of the
+three corrections.
+
 | Slice | Size | Scope | Blocked by |
 |---|---|---|---|
 | A. Engine primitives | M | Augment primitive (schema, registry, `UnitBuildSchema.augmentIds`, `init.ts` stat-delta application) **+** stun/root status kind **+** buff (haste/damage-up) status kind, added together to `vocab.ts`/the resolve step. One `RULESET_VERSION` bump (v2->v3), one golden-replay regen, one explanatory commit note. | none (first slice) |
@@ -369,7 +464,7 @@ large enough to earn its own slice, G, rather than being an implicit footnote in
 | D. Augment content | M | 3 augment instances (Iron Plating, Swift Boots, Vital Surge) registered against the augment primitive. | Blocked by: A |
 | E. Server round-trip / serialization verification | S | No server schema change needed (see the round-2 correction above): add an integration test proving a stored warband with non-empty `augmentIds` persists and returns intact through `POST -> GET -> PUT -> GET`, and confirm the jsonb column round-trips the array without special-casing, since both the write path (`routes.ts`) and match resolution (`matches/resolve.ts`) reuse core's `WarbandSchema`/`parseWarband` unmodified. | Blocked by: A |
 | F. Web builder UI | M | Warband builder UI surface for selecting augments per unit. | Blocked by: A, D (needs real augment content to populate the picker) |
-| G. `policySmokeV1` retirement (core + foundry ripple) | M | Per the full ledger above: remove the `policySmokeV1` named export and its `behaviorIds` entry (`index.ts`), its seed-registry registration (`seed-registry.ts`), its barrel export and test assertions (`content/behaviors/index.ts`/`.test.ts`), its dedicated match-integration test and demo build fixtures (`sim/policy-smoke-v1-match.test.ts`, `builds/policy-1v1-a.json`, `builds/policy-1v1-b.json`); retire the foundry `sample-policy` submission and its per-push CI gate line (`.github/workflows/ci.yml`), and update the 5 foundry test files that exercise it. Files a tracked follow-up issue to re-author a v2-trained exported-policy sample submission once one exists (out of this batch's scope — no retraining here). No server or web code change needed (same reuse reasoning as Slice E); confirm the already-stored-warband edge case is nil in the real `warbands` table before ratification. | Must co-land with C (see C's note); Blocked by: C |
+| G. `policySmokeV1` retirement (core + foundry ripple) | M | Per the full ledger above: remove the `policySmokeV1` named export and its `behaviorIds` entry (`index.ts`) plus `index.test.ts`'s assertions on both; its seed-registry registration (`seed-registry.ts`) plus `seed-registry.test.ts`'s two assertions; its barrel export and test assertions (`content/behaviors/index.ts`/`.test.ts`); the dedicated `content/behaviors/policy/` implementation and test modules (`weights-schema.ts`, `policy-smoke-v1.ts`, `inference.ts`, and their three dedicated test files) plus the committed `policy-smoke-v1.weights.json` and `inference-parity.fixture.json`; its match-integration test and `buildA` demo fixture (`sim/policy-smoke-v1-match.test.ts`, `builds/policy-1v1-a.json` — **not** `builds/policy-1v1-b.json`, which is independent, permanent foundry baseline infrastructure and is kept); the gym-side parity-fixture sync test (`gym/tests/test_inference_parity_fixture.py`); retire the foundry `sample-policy` submission and its per-push CI gate line (`.github/workflows/ci.yml`), and update the 5 foundry test files that exercise it. Files a tracked follow-up issue to re-author a v2-trained exported-policy sample submission once one exists (out of this batch's scope — no retraining here). No server or web code change needed (same reuse reasoning as Slice E); confirm the already-stored-warband edge case is nil in the real `warbands` table before ratification. | Must co-land with C (see C's note); Blocked by: C |
 
 **Wellspring boundary note.** #70 excludes the Wellspring objective (#71/#72); #71 is separately blocked by
 #70. If Wellspring's channel-buff effect needs the same positive-buff status kind introduced in Slice A here
@@ -455,11 +550,17 @@ here.
       (the augment primitive alone does not, but the 4 new Skills grow the skill catalog and widen
       `OBS_SELF_FIELD_COUNT` from 11 to 15 — a breaking layout change per `observation.ts`'s own header
       contract), with the resulting ripple onto `policySmokeV1` priced against its full ledger (core's public
-      API and `behaviorIds`, the seed registry, the behaviors barrel and its test, the match-integration test
-      and its build fixtures, and the entire foundry surface including its per-push CI gate) — **recommended:
-      deprecate/unregister in the same commit as the encoder bump (Slice G, co-landed with Slice C)**, not
-      re-export or re-train inline, and not a frozen per-policy encoder shim (evaluated, deferred to its own
-      follow-up spike). The already-stored-server-warband edge case and the temporary Phase 3 DoD
+      API and `behaviorIds` plus their own test coverage, the seed registry and its test, the behaviors
+      barrel and its test, the dedicated `content/behaviors/policy/` implementation and test modules, the
+      match-integration test and its `-a.json` build fixture — `-b.json` is independent foundry
+      infrastructure and is kept, not removed — the gym-side parity-fixture sync test, and the entire foundry
+      surface including its per-push CI gate) — **recommended: deprecate/unregister in the same commit as the
+      encoder bump (Slice G, co-landed with Slice C)**, not re-export or re-train inline, and not a frozen
+      per-policy encoder shim (a real, no-public-contract-change path exists via a private downcast reslice
+      plus a relaxed `weights-schema.ts` check, re-evaluated and still rejected — not because no path exists,
+      but because it would be a permanent, open-ended maintenance tax to keep a zero-gameplay-value smoke
+      artifact alive; deferred to its own follow-up spike as the *general* per-policy-pinned-encoder question
+      instead). The already-stored-server-warband edge case and the temporary Phase 3 DoD
       exported-policy evidence gap are both named explicitly above, with a tracked follow-up issue recommended
       for a v2-trained replacement sample submission, rather than left unstated.
 
