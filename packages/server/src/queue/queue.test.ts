@@ -63,7 +63,10 @@ describe.skipIf(!url)('queue routes', () => {
    * `settleQueue` can await a pass to quiescence, including a K-triggered
    * one that never touches the scheduler at all.
    */
-  function buildTestApp(maxPool?: number): {
+  function buildTestApp(
+    maxPool?: number,
+    bounds?: { maxFailures?: number; maxAgeMs?: number }
+  ): {
     app: FastifyInstance;
     scheduler: ManualScheduler;
     getQueueService: () => QueueService;
@@ -77,6 +80,8 @@ describe.skipIf(!url)('queue routes', () => {
       queue: {
         scheduler,
         maxPool,
+        maxFailures: bounds?.maxFailures,
+        maxAgeMs: bounds?.maxAgeMs,
         onQueueServiceCreated: (service) => {
           queueServiceBox.current = service;
         },
@@ -723,6 +728,58 @@ describe.skipIf(!url)('queue routes', () => {
     const userC = await registerUser(app);
     const warbandCId = await saveWarband(app, userC, warbandA);
     await postEnqueue(app, userC, warbandCId);
+
+    await app.close();
+  });
+
+  // #144: a ghost entry — one whose pairing keeps failing (here, its
+  // account was deleted mid-flight, same setup as the both-restore test
+  // above) — is evicted from the pool once bounded by QUEUE_MAX_FAILURES,
+  // instead of being restored to `waiting` forever. maxFailures is
+  // deliberately overridden to 1 here so a single failed pass is enough to
+  // observe the eviction deterministically via the injected manual
+  // scheduler (no real sleeps).
+  it('ghost-entry eviction: a pairing that keeps failing is evicted after maxFailures, and a subsequent GET /queue reports it no longer queued', async () => {
+    const { app, scheduler, getQueueService } = buildTestApp(undefined, { maxFailures: 1 });
+    const userA = await registerUser(app);
+    const userB = await registerUser(app);
+    const warbandAId = await saveWarband(app, userA, warbandA);
+    const warbandBId = await saveWarband(app, userB, warbandB);
+
+    await postEnqueue(app, userA, warbandAId);
+    await postEnqueue(app, userB, warbandBId);
+
+    // Same failure trigger as the both-restore test: delete A's account so
+    // resolveMatch's insert violates matches.user_a_id's FK, forcing
+    // failPairing on the very first pairing pass.
+    await db.execute(sql`DELETE FROM users WHERE id = ${userA.id}`);
+
+    expect(scheduler.pending).toBe(true);
+    scheduler.fire();
+    await getQueueService().settled();
+
+    // A is evicted outright (maxFailures: 1 means the first failure already
+    // reaches it) — no longer 'waiting', reported as 'idle' by the
+    // existing GET /queue status read, with no code changes to getStatus
+    // needed (an evicted entry is simply absent from every internal map).
+    expect((await getStatus(app, userA)).status).toBe('idle');
+
+    // failPairing's restore-or-evict applies symmetrically to both sides of
+    // a failed pairing (the #108 both-restore design, extended by #144): B
+    // is not at fault, but is evicted too under this test's aggressive
+    // maxFailures: 1. A production default (3) tolerates one unlucky
+    // pairing with a ghost entry before evicting an innocent bystander.
+    expect((await getStatus(app, userB)).status).toBe('idle');
+
+    // Fully gone, not merely idle-looking: DELETE now 404s for both,
+    // proving they left `waiting`/`resolving` entirely rather than being
+    // stuck in some other live state.
+    const deleteA = await app.inject({
+      method: 'DELETE',
+      url: '/queue',
+      headers: { cookie: userA.cookie, 'csrf-token': userA.csrfToken },
+    });
+    expect(deleteA.statusCode).toBe(404);
 
     await app.close();
   });

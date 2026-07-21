@@ -7,6 +7,13 @@ export interface WaitingEntry {
   /** The warband's `data` column, fetched at enqueue time (see decision 2) so pairing itself needs no I/O. */
   build: unknown;
   enqueuedAt: number;
+  /**
+   * Number of times a pairing involving this entry has been restored via
+   * failPairing (see #144). Starts at 0 on enqueue() and is never reset by
+   * a restore — it only ever grows, so it (alongside enqueuedAt) is what
+   * the bounded-eviction policy checks against maxFailures/maxAgeMs.
+   */
+  failureCount: number;
 }
 
 /** The two sides of a resolved-or-resolving pairing, ready to hand to resolveMatch unchanged. */
@@ -31,6 +38,24 @@ export interface Pairing {
 }
 
 export type EnqueueOutcome = { status: 'waiting' } | { status: 'already-queued' };
+
+/**
+ * Reported once per evicted user by the bounded-eviction policy (#144): a
+ * queue entry whose pairing keeps failing (failureCount reaches
+ * `maxFailures`) or whose total time in the pool exceeds `maxAgeMs` is
+ * dropped from `waiting` instead of restored. `onEviction`'s caller
+ * (queue/routes.ts) is expected to log this — QueueService itself has no
+ * logger dependency, matching the existing `resolver` injection pattern.
+ */
+export interface QueueEviction {
+  userId: string;
+  /** Which threshold triggered the eviction. Both are entry-scoped, not idle-time-scoped for a healthy waiter — see restoreOrEvict's doc comment. */
+  reason: 'max-failures' | 'max-age';
+  /** The entry's failureCount at the moment of eviction (post-increment). */
+  failureCount: number;
+  /** Milliseconds (or scheduler-ticks in tests) since the entry's original enqueuedAt. */
+  ageMs: number;
+}
 
 export type QueueStatus =
   | { status: 'matched'; matchId: string; result: MatchResult }
@@ -177,6 +202,23 @@ export function createManualScheduler(): ManualScheduler {
 export const DEFAULT_QUEUE_WINDOW_MS = 5000;
 /** Default pool-size pairing trigger (K): see config.ts's QUEUE_MAX_POOL. */
 export const DEFAULT_QUEUE_MAX_POOL = 8;
+/**
+ * Default bounded-eviction failure-count cap: see config.ts's
+ * QUEUE_MAX_FAILURES. Three failed pairing attempts is enough to rule out a
+ * single unlucky resolveMatch blip (e.g. a transient DB hiccup) while
+ * bounding how many windows a genuinely broken entry (e.g. its warband row
+ * or user row was deleted mid-flight) can occupy the pool.
+ */
+export const DEFAULT_QUEUE_MAX_FAILURES = 3;
+/**
+ * Default bounded-eviction age cap (ms): see config.ts's QUEUE_MAX_AGE_MS.
+ * A backstop for an entry that keeps getting paired-and-failing without
+ * ever reaching maxFailures quickly (e.g. it's rarely the oldest/nearest
+ * candidate in a busy pool) — one minute is many multiples of the default
+ * QUEUE_WINDOW_MS (5s), so it only bites an entry that has already had
+ * several failed attempts, never a healthy entry mid-first-wait.
+ */
+export const DEFAULT_QUEUE_MAX_AGE_MS = 60_000;
 
 export interface QueueServiceOptions {
   /**
@@ -197,6 +239,29 @@ export interface QueueServiceOptions {
   maxPool?: number;
   /** Clock/timer seam. Defaults to real timers (defaultScheduler). */
   scheduler?: Scheduler;
+  /**
+   * Bounded-eviction failure-count cap (#144): an entry is evicted, not
+   * restored, once a failPairing restore would bring its failureCount to
+   * this value. Defaults to DEFAULT_QUEUE_MAX_FAILURES.
+   */
+  maxFailures?: number;
+  /**
+   * Bounded-eviction age cap in ms (#144): an entry is evicted, not
+   * restored, once its total time since its original enqueuedAt would
+   * reach this value at a failPairing restore. Defaults to
+   * DEFAULT_QUEUE_MAX_AGE_MS. Checked only from failPairing (see
+   * restoreOrEvict's doc comment) — never against a healthy entry that has
+   * not yet failed a pairing.
+   */
+  maxAgeMs?: number;
+  /**
+   * Invoked once per evicted user, synchronously, from within failPairing.
+   * Constructed by queue/routes.ts to log via app.log — QueueService itself
+   * has no logger dependency, matching the `resolver` injection pattern.
+   * Optional: omitting it silently drops the eviction notice (still applied
+   * to queue state), which is fine for tests that don't care.
+   */
+  onEviction?: (eviction: QueueEviction) => void;
 }
 
 /**
@@ -246,6 +311,9 @@ export class QueueService {
   private readonly windowMs: number;
   private readonly maxPool: number;
   private readonly scheduler: Scheduler;
+  private readonly maxFailures: number;
+  private readonly maxAgeMs: number;
+  private readonly onEviction: ((eviction: QueueEviction) => void) | undefined;
 
   private timerHandle: unknown | undefined;
   /** The most recently started pass's settling promise, for tests (and `settled()`) to await quiescence deterministically. */
@@ -256,6 +324,9 @@ export class QueueService {
     this.windowMs = options.windowMs ?? DEFAULT_QUEUE_WINDOW_MS;
     this.maxPool = options.maxPool ?? DEFAULT_QUEUE_MAX_POOL;
     this.scheduler = options.scheduler ?? defaultScheduler;
+    this.maxFailures = options.maxFailures ?? DEFAULT_QUEUE_MAX_FAILURES;
+    this.maxAgeMs = options.maxAgeMs ?? DEFAULT_QUEUE_MAX_AGE_MS;
+    this.onEviction = options.onEviction;
   }
 
   /** Side-effect-free status read for GET /queue. A matched result is retained (not cleared) until the next enqueue(). */
@@ -285,7 +356,7 @@ export class QueueService {
     }
 
     this.matchedResults.delete(userId);
-    this.waiting.set(userId, { userId, rating, build, enqueuedAt: this.scheduler.now() });
+    this.waiting.set(userId, { userId, rating, build, enqueuedAt: this.scheduler.now(), failureCount: 0 });
 
     if (this.waiting.size >= this.maxPool) {
       this.clearTimer();
@@ -307,16 +378,17 @@ export class QueueService {
 
   /**
    * Called after the resolver's resolveMatch call rejects: restores BOTH
-   * entries, unchanged, to the queue (see Pairing.entryA/entryB's doc
-   * comment for why both, not just A, since #108) and re-arms the
-   * batching-window timer if that restoration makes the pool pairable
-   * again.
+   * entries to the queue (see Pairing.entryA/entryB's doc comment for why
+   * both, not just A, since #108) — UNLESS the bounded-eviction policy
+   * (#144) says otherwise (see restoreOrEvict), in which case that entry is
+   * dropped instead. Re-arms the batching-window timer afterward if
+   * whatever got restored makes the pool pairable again.
    */
   failPairing(pairing: Pairing): void {
     this.resolving.delete(pairing.userAId);
     this.resolving.delete(pairing.userBId);
-    this.waiting.set(pairing.userAId, pairing.entryA);
-    this.waiting.set(pairing.userBId, pairing.entryB);
+    this.restoreOrEvict(pairing.entryA);
+    this.restoreOrEvict(pairing.entryB);
     this.armTimerIfPairable();
   }
 
@@ -367,6 +439,39 @@ export class QueueService {
   /** Cancels any pending batching-window timer. Called from routes.ts's `onClose` hook (same lifecycle precedent as the session pruner in plugins/session.ts) so a live app shutdown never leaves a dangling timer. */
   dispose(): void {
     this.clearTimer();
+  }
+
+  /**
+   * The bounded-eviction policy (#144), applied to one side of a failed
+   * pairing: increments the entry's failureCount, then either evicts it
+   * (dropping it from the pool entirely, reporting via onEviction) or
+   * restores it to `waiting` unchanged apart from the incremented
+   * failureCount. Eviction fires when the incremented failureCount reaches
+   * `maxFailures`, OR the entry's total age since its original
+   * `enqueuedAt` reaches `maxAgeMs` — whichever comes first.
+   *
+   * Deliberately only ever called from failPairing: this keeps the policy
+   * failure-count/age-since-first-failed-attempt scoped, not idle-time
+   * scoped for a healthy entry that has never been paired. A lone waiter
+   * who never gets a pairing attempt (no partner has ever been available)
+   * never reaches this method and so is never evicted by it, however high
+   * `maxAgeMs`/how long they've waited — see the class's lone-waiter policy
+   * note and #144's own acceptance criterion on this.
+   */
+  private restoreOrEvict(entry: WaitingEntry): void {
+    const failureCount = entry.failureCount + 1;
+    const ageMs = this.scheduler.now() - entry.enqueuedAt;
+
+    if (failureCount >= this.maxFailures) {
+      this.onEviction?.({ userId: entry.userId, reason: 'max-failures', failureCount, ageMs });
+      return;
+    }
+    if (ageMs >= this.maxAgeMs) {
+      this.onEviction?.({ userId: entry.userId, reason: 'max-age', failureCount, ageMs });
+      return;
+    }
+
+    this.waiting.set(entry.userId, { ...entry, failureCount });
   }
 
   private armTimerIfPairable(): void {

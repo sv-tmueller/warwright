@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createManualScheduler, createQueueService, selectOpponent, type Pairing, type WaitingEntry } from './service.js';
+import {
+  createManualScheduler,
+  createQueueService,
+  selectOpponent,
+  type Pairing,
+  type QueueEviction,
+  type WaitingEntry,
+} from './service.js';
 
 function entry(overrides: Partial<WaitingEntry> = {}): WaitingEntry {
   return {
@@ -7,8 +14,18 @@ function entry(overrides: Partial<WaitingEntry> = {}): WaitingEntry {
     rating: 1500,
     build: { name: 'default' },
     enqueuedAt: 0,
+    failureCount: 0,
     ...overrides,
   };
+}
+
+/** An onEviction stub that records every eviction it was handed. */
+function recordingEvictions() {
+  const evictions: QueueEviction[] = [];
+  const onEviction = vi.fn((eviction: QueueEviction) => {
+    evictions.push(eviction);
+  });
+  return { onEviction, evictions };
 }
 
 /** A resolver stub that resolves immediately and records every pass it was handed. */
@@ -471,6 +488,133 @@ describe('QueueService', () => {
       expect(scheduler.pending).toBe(true);
       expect(scheduler.pendingMs).toBe(5000);
       expect(scheduler.scheduleCount).toBe(2);
+    });
+  });
+
+  describe('bounded eviction (maxFailures / maxAgeMs)', () => {
+    it('evicts both entries once a pairing has failed maxFailures times, reporting idle on a subsequent getStatus and not-queued on dequeue', async () => {
+      const { resolver, calls } = recordingResolver();
+      const { onEviction, evictions } = recordingEvictions();
+      const scheduler = createManualScheduler();
+      const service = createQueueService({
+        resolver,
+        scheduler,
+        windowMs: 100,
+        maxPool: 8,
+        maxFailures: 2,
+        maxAgeMs: 1_000_000,
+        onEviction,
+      });
+
+      service.enqueue('a', 1500, { name: 'A' });
+      service.enqueue('b', 1500, { name: 'B' });
+
+      // First failure: failureCount goes to 1, below maxFailures (2) -> restored.
+      await scheduler.fire();
+      const [firstPairing] = calls[0]!;
+      service.failPairing(firstPairing!);
+      expect(service.getStatus('a')).toEqual({ status: 'waiting' });
+      expect(service.getStatus('b')).toEqual({ status: 'waiting' });
+      expect(onEviction).not.toHaveBeenCalled();
+
+      // Second failure: failureCount reaches maxFailures (2) -> evicted, not restored.
+      expect(scheduler.pending).toBe(true);
+      await scheduler.fire();
+      const [secondPairing] = calls[1]!;
+      service.failPairing(secondPairing!);
+
+      expect(service.getStatus('a')).toEqual({ status: 'idle' });
+      expect(service.getStatus('b')).toEqual({ status: 'idle' });
+      expect(service.dequeue('a')).toBe('not-queued');
+      expect(service.dequeue('b')).toBe('not-queued');
+
+      expect(evictions).toHaveLength(2);
+      expect(evictions.map((e) => e.userId).sort()).toEqual(['a', 'b']);
+      for (const eviction of evictions) {
+        expect(eviction.reason).toBe('max-failures');
+        expect(eviction.failureCount).toBe(2);
+      }
+
+      // Evicted, no longer pairable: no timer left armed for these two.
+      expect(scheduler.pending).toBe(false);
+    });
+
+    it('evicts both entries once their age exceeds maxAgeMs, even with a generous maxFailures', async () => {
+      const { resolver, calls } = recordingResolver();
+      const { onEviction, evictions } = recordingEvictions();
+      const scheduler = createManualScheduler();
+      const service = createQueueService({
+        resolver,
+        scheduler,
+        windowMs: 100,
+        maxPool: 8,
+        maxFailures: 1000,
+        maxAgeMs: 2,
+        onEviction,
+      });
+
+      // enqueuedAt: a=1, b=2 (createManualScheduler's now() is a counter
+      // that advances on every call, and scheduler.fire() itself makes no
+      // further now() calls — see collectPairings, which sorts on the
+      // already-stamped enqueuedAt values only).
+      service.enqueue('a', 1500, { name: 'A' });
+      service.enqueue('b', 1500, { name: 'B' });
+      await scheduler.fire();
+      const [pairing] = calls[0]!;
+
+      // restoreOrEvict's now() calls: 3 for a (age = 3-1 = 2 >= maxAgeMs),
+      // then 4 for b (age = 4-2 = 2 >= maxAgeMs) -> both evicted by age.
+      service.failPairing(pairing!);
+
+      expect(service.getStatus('a')).toEqual({ status: 'idle' });
+      expect(service.getStatus('b')).toEqual({ status: 'idle' });
+      expect(evictions).toHaveLength(2);
+      for (const eviction of evictions) {
+        expect(eviction.reason).toBe('max-age');
+        expect(eviction.failureCount).toBe(1); // below maxFailures (1000); age is what triggered this
+      }
+    });
+
+    it('never evicts a lone healthy waiter who is never paired, regardless of maxFailures/maxAgeMs (failure-count-scoped, not idle-time-scoped)', () => {
+      const { resolver } = recordingResolver();
+      const { onEviction } = recordingEvictions();
+      const scheduler = createManualScheduler();
+      const service = createQueueService({
+        resolver,
+        scheduler,
+        windowMs: 100,
+        maxPool: 8,
+        maxFailures: 1,
+        maxAgeMs: 1,
+        onEviction,
+      });
+
+      service.enqueue('a', 1500, { name: 'A' });
+      // Pool never reaches 2: no timer ever arms, no pass ever runs, so the
+      // eviction policy — which only ever runs from failPairing — never
+      // even considers 'a'.
+      expect(scheduler.pending).toBe(false);
+      expect(service.getStatus('a')).toEqual({ status: 'waiting' });
+      expect(onEviction).not.toHaveBeenCalled();
+    });
+
+    it('defaults maxFailures and maxAgeMs when not supplied', async () => {
+      const { resolver, calls } = recordingResolver();
+      const { onEviction, evictions } = recordingEvictions();
+      const scheduler = createManualScheduler();
+      const service = createQueueService({ resolver, scheduler, windowMs: 100, maxPool: 8, onEviction });
+
+      service.enqueue('a', 1500, { name: 'A' });
+      service.enqueue('b', 1500, { name: 'B' });
+      await scheduler.fire();
+      const [pairing] = calls[0]!;
+
+      // A single failure, with generous production defaults, restores
+      // rather than evicts.
+      service.failPairing(pairing!);
+      expect(service.getStatus('a')).toEqual({ status: 'waiting' });
+      expect(service.getStatus('b')).toEqual({ status: 'waiting' });
+      expect(evictions).toHaveLength(0);
     });
   });
 });

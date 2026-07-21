@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import { DEFAULT_QUEUE_MAX_POOL, DEFAULT_QUEUE_WINDOW_MS } from './queue/service.js';
+import {
+  DEFAULT_QUEUE_MAX_AGE_MS,
+  DEFAULT_QUEUE_MAX_FAILURES,
+  DEFAULT_QUEUE_MAX_POOL,
+  DEFAULT_QUEUE_WINDOW_MS,
+} from './queue/service.js';
 
 const EnvSchema = z.object({
   DATABASE_URL: z.url(),
@@ -23,6 +28,15 @@ const EnvSchema = z.object({
   // for the window timer. Must be at least 2 (a pass needs two entries to
   // ever pair anyone).
   QUEUE_MAX_POOL: z.coerce.number().int().min(2).default(DEFAULT_QUEUE_MAX_POOL),
+  // Bounded-eviction policy (#144): a queue entry whose pairing keeps
+  // failing (e.g. a deleted user/warband row, or a persistent resolveMatch
+  // error) is evicted from the pool — instead of restored forever — once
+  // either bound is reached. See queue/service.ts's restoreOrEvict doc
+  // comment: both are checked only when a pairing has already failed at
+  // least once, so a healthy waiter who simply hasn't found a partner yet
+  // is never evicted by either.
+  QUEUE_MAX_FAILURES: z.coerce.number().int().min(1).default(DEFAULT_QUEUE_MAX_FAILURES),
+  QUEUE_MAX_AGE_MS: z.coerce.number().int().positive().default(DEFAULT_QUEUE_MAX_AGE_MS),
 });
 
 export interface Config {
@@ -33,6 +47,8 @@ export interface Config {
   cookieSecure: boolean;
   queueWindowMs: number;
   queueMaxPool: number;
+  queueMaxFailures: number;
+  queueMaxAgeMs: number;
 }
 
 /**
@@ -50,5 +66,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     cookieSecure: parsed.COOKIE_SECURE,
     queueWindowMs: parsed.QUEUE_WINDOW_MS,
     queueMaxPool: parsed.QUEUE_MAX_POOL,
+    queueMaxFailures: parsed.QUEUE_MAX_FAILURES,
+    queueMaxAgeMs: parsed.QUEUE_MAX_AGE_MS,
   };
 }
