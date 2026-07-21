@@ -8,6 +8,7 @@ import {
   json,
   jsonb,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -102,6 +103,47 @@ export const ratings = pgTable('ratings', {
   volatility: doublePrecision('volatility').notNull().default(DEFAULT_VOLATILITY),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+// Cosmetics-only economy (#73): a disjoint, userId-keyed namespace, never
+// referenced by the matches/resolve.ts path. cosmeticId is stored as text
+// and validated at write time against src/cosmetics/catalog.ts's registry —
+// the same pattern warbands uses for roleId/skillId/behaviorId (a code
+// catalog, not an FK table). See src/cosmetics/integrity.test.ts for the
+// proof this namespace never leaks into the sim-input path.
+
+// Which cosmetics an account owns beyond the catalog's defaultOwned set.
+// One row per (userId, cosmeticId) acquisition.
+export const cosmeticOwnership = pgTable(
+  'cosmetic_ownership',
+  {
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    cosmeticId: text('cosmetic_id').notNull(),
+    acquiredAt: timestamp('acquired_at', { withTimezone: true }).notNull().defaultNow(),
+    // How this ownership row was granted (e.g. "noop-entitlement"); an
+    // audit/debug field, never read by anything cosmetic-integrity-sensitive.
+    sourceKind: text('source_kind').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.cosmeticId] })]
+);
+
+// Per-account, per-slot cosmetic selection (which owned cosmetic is
+// "equipped" for a given slot). One row per (userId, slot); a missing row
+// means "use the catalog's DEFAULT_COSMETIC_BY_SLOT for this slot" (see
+// src/cosmetics/routes.ts's lazy-default read).
+export const cosmeticSelection = pgTable(
+  'cosmetic_selection',
+  {
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    slot: text('slot').notNull(),
+    cosmeticId: text('cosmetic_id').notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.slot] })]
+);
 
 // Shaped to match connect-pg-simple's expected session-store table exactly
 // (sid PK, sess json, expire timestamp(6) + an index on expire).

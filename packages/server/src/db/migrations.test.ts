@@ -41,13 +41,21 @@ describe.skipIf(!url)('migrations', () => {
     await pool.end();
   });
 
-  it('creates the five base tables', async () => {
+  it('creates the seven base tables', async () => {
     const result = await db.execute<{ table_name: string }>(
       sql`SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name`
     );
     const tableNames = result.rows.map((row) => row.table_name);
 
-    expect(tableNames).toEqual(['matches', 'ratings', 'sessions', 'users', 'warbands']);
+    expect(tableNames).toEqual([
+      'cosmetic_ownership',
+      'cosmetic_selection',
+      'matches',
+      'ratings',
+      'sessions',
+      'users',
+      'warbands',
+    ]);
   });
 
   it('creates the expected key columns', async () => {
@@ -87,6 +95,14 @@ describe.skipIf(!url)('migrations', () => {
         'sessions.sid',
         'sessions.sess',
         'sessions.expire',
+        'cosmetic_ownership.user_id',
+        'cosmetic_ownership.cosmetic_id',
+        'cosmetic_ownership.acquired_at',
+        'cosmetic_ownership.source_kind',
+        'cosmetic_selection.user_id',
+        'cosmetic_selection.slot',
+        'cosmetic_selection.cosmetic_id',
+        'cosmetic_selection.updated_at',
       ])
     );
   });
