@@ -32,6 +32,14 @@ const invalidSkill = {
   effect: { kind: 'direct-damage' },
 };
 
+const validAugment = {
+  id: 'iron-plating',
+  name: 'Iron Plating',
+  armorDelta: 5,
+};
+
+const invalidAugment = { ...validAugment, armorDelta: 5.5 };
+
 function makeUnitView(id: number): UnitView {
   return {
     id,
@@ -57,21 +65,29 @@ describe('createContentRegistry', () => {
     expect(registry.getBehavior('fixture')).toBe(fixtureBehavior);
   });
 
-  it('throws when loading an invalid role or skill', () => {
+  it('throws when loading an invalid role, skill, or augment', () => {
     const registry = createContentRegistry();
     expect(() => registry.loadRole(invalidRole)).toThrow();
     expect(() => registry.loadSkill(invalidSkill)).toThrow();
+    expect(() => registry.loadAugment(invalidAugment)).toThrow();
   });
 
-  it('loadRole then getRole returns the parsed Role; getRole/getSkill throw on unknown id', () => {
+  it('loadRole then getRole returns the parsed Role; getRole/getSkill/getAugment throw on unknown id', () => {
     const registry = createContentRegistry();
     const parsed = registry.loadRole(validRole);
     expect(registry.getRole('warrior')).toEqual(parsed);
     expect(() => registry.getRole('nope')).toThrow();
     expect(() => registry.getSkill('nope')).toThrow();
+    expect(() => registry.getAugment('nope')).toThrow('Unknown augment id: nope');
   });
 
-  it('throws on duplicate ids for registerBehavior, loadRole, and loadSkill', () => {
+  it('loadAugment then getAugment returns the parsed Augment', () => {
+    const registry = createContentRegistry();
+    const parsed = registry.loadAugment(validAugment);
+    expect(registry.getAugment('iron-plating')).toEqual(parsed);
+  });
+
+  it('throws on duplicate ids for registerBehavior, loadRole, loadSkill, and loadAugment', () => {
     const registry = createContentRegistry();
     registry.registerBehavior(fixtureBehavior);
     expect(() => registry.registerBehavior(fixtureBehavior)).toThrow();
@@ -81,6 +97,9 @@ describe('createContentRegistry', () => {
 
     registry.loadSkill(validSkill);
     expect(() => registry.loadSkill(validSkill)).toThrow();
+
+    registry.loadAugment(validAugment);
+    expect(() => registry.loadAugment(validAugment)).toThrow('Duplicate augment id: iron-plating');
   });
 
   it('throws on registerBehavior with an empty id', () => {

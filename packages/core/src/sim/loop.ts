@@ -64,6 +64,12 @@ function applyAction(
   action: Action,
   tick: number,
 ): void {
+  // Stunned units take no action (no move, move-toward, attack, or cast).
+  // Cooldowns, DoTs, and status timers still tick in the housekeeping phase
+  // below; decide() still runs (see stepTick) so RNG draw order is
+  // unaffected -- only the decided action is not applied.
+  if (unit.stun !== null) return;
+
   if (action.kind === 'idle') {
     return;
   }

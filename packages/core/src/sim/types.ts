@@ -19,10 +19,14 @@ export type SkillState = {
   cooldownRemaining: number;
 };
 
-// Shared shape for the slow and shield statuses. For slow, magnitude is an
-// integer percent reduction 0-100 applied with integer division. For
-// shield, magnitude is the remaining absorb pool, decremented by damage;
-// the status expires when either field reaches 0.
+// Shared shape for the slow, shield, stun, and empower statuses. For slow,
+// magnitude is an integer percent reduction 0-100 applied with integer
+// division. For shield, magnitude is the remaining absorb pool, decremented
+// by damage; the status expires when either field reaches 0. For stun,
+// magnitude is carried but unread (the unit simply takes no action while
+// stunned). For empower, magnitude is an integer percent bonus applied with
+// integer division to basic-attack damage at attack resolution and to move
+// speed at move resolution.
 export type StatusState = {
   magnitude: number;
   remainingTicks: number;
@@ -55,6 +59,8 @@ export type Unit = {
 
   slow: StatusState | null;
   shield: StatusState | null;
+  stun: StatusState | null;
+  empower: StatusState | null;
   activeDots: DotState[];
 };
 

@@ -34,7 +34,12 @@ describe('formatReport', () => {
         id: 'sample-aggro',
         author: 'foundry-fixtures',
         entry: 'behavior.ts',
-        build: { roleId: 'reaver', skillIds: ['cleave'], position: { x: 0, y: 0 } },
+        build: {
+          roleId: 'reaver',
+          skillIds: ['cleave'],
+          position: { x: 0, y: 0 },
+          augmentIds: [],
+        },
         shape: 'general',
       },
       stage3: {

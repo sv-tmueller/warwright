@@ -24,6 +24,8 @@ function makeUnit(overrides: Partial<Unit> = {}): Unit {
     skills: [],
     slow: null,
     shield: null,
+    stun: null,
+    empower: null,
     activeDots: [],
     ...overrides,
   };
@@ -42,6 +44,21 @@ describe('resolveSkillEffect', () => {
     expect(log).toEqual([
       { kind: 'cast', tick: 5, unitId: 1, skillId: 'fireball', targetId: 2 },
       { kind: 'damage', tick: 5, sourceId: 1, targetId: 2, amount: 7, absorbed: 0, hpAfter: 93 },
+    ]);
+  });
+
+  it('does NOT boost direct-damage skill amount when the caster is empowered (empower is scoped to basic-attack/move only)', () => {
+    const caster = makeUnit({ id: 1, empower: { magnitude: 50, remainingTicks: 40 } });
+    const target = makeUnit({ id: 2, armor: 0, hp: 100 });
+    const log: MatchEvent[] = [];
+    const effect: SkillEffect = { kind: 'direct-damage', amount: 10 };
+
+    resolveSkillEffect(caster, target, 'fireball', effect, log, 5);
+
+    expect(target.hp).toBe(90);
+    expect(log).toEqual([
+      { kind: 'cast', tick: 5, unitId: 1, skillId: 'fireball', targetId: 2 },
+      { kind: 'damage', tick: 5, sourceId: 1, targetId: 2, amount: 10, absorbed: 0, hpAfter: 90 },
     ]);
   });
 

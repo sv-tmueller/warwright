@@ -4,7 +4,11 @@ export const TICK_HZ = 20;
 // logic stays in integer ticks and must never use DT in combat math.
 export const DT = 1 / TICK_HZ;
 
-export const RULESET_VERSION = 2;
+// Phase 4 Slice A primitives, #147: adds the augment primitive
+// (UnitBuildSchema.augmentIds, a replay-input shape change) plus the
+// stun/empower status kinds. No existing build's outcome changes; the
+// golden-replay hash moves only because match-start embeds this version.
+export const RULESET_VERSION = 3;
 
 // Square arena, origin top-left at (0, 0), integer coordinates. 1000 units
 // per axis leaves clean room for melee ranges (tens of units) versus ranged

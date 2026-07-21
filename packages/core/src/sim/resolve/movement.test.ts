@@ -21,6 +21,8 @@ function makeUnit(overrides: Partial<Unit> = {}): Unit {
     skills: [],
     slow: null,
     shield: null,
+    stun: null,
+    empower: null,
     activeDots: [],
     ...overrides,
   };
@@ -67,6 +69,42 @@ describe('moveUnitToward', () => {
 
     expect(unit.pos).toEqual({ x: 0, y: 0 });
     expect(log).toEqual([]);
+  });
+
+  it('scales up the step for an empowered unit', () => {
+    const unit = makeUnit({
+      moveSpeed: 10,
+      pos: { x: 0, y: 0 },
+      empower: { magnitude: 50, remainingTicks: 40 },
+    });
+    const log: MatchEvent[] = [];
+
+    moveUnitToward(unit, { x: 100, y: 0 }, log, 5);
+
+    // trunc(10 * (100 + 50) / 100) = trunc(15) = 15
+    expect(unit.pos).toEqual({ x: 15, y: 0 });
+    expect(log).toEqual([
+      { kind: 'move', tick: 5, unitId: 1, from: { x: 0, y: 0 }, to: { x: 15, y: 0 } },
+    ]);
+  });
+
+  it('applies empower then slow sequentially (empower first) when both are active', () => {
+    const unit = makeUnit({
+      moveSpeed: 10,
+      pos: { x: 0, y: 0 },
+      empower: { magnitude: 50, remainingTicks: 40 },
+      slow: { magnitude: 30, remainingTicks: 40 },
+    });
+    const log: MatchEvent[] = [];
+
+    moveUnitToward(unit, { x: 100, y: 0 }, log, 5);
+
+    // empower: trunc(10 * 150 / 100) = 15
+    // slow: trunc(15 * 70 / 100) = trunc(10.5) = 10
+    expect(unit.pos).toEqual({ x: 10, y: 0 });
+    expect(log).toEqual([
+      { kind: 'move', tick: 5, unitId: 1, from: { x: 0, y: 0 }, to: { x: 10, y: 0 } },
+    ]);
   });
 
   it('emits a from/to snapshot unaffected by later mutation of unit.pos', () => {

@@ -34,6 +34,15 @@ function loadBuild(name: string): Record<string, unknown> {
 const warbandA = loadBuild('warband-a.json');
 const warbandB = loadBuild('warband-b.json');
 
+// The echoed/stored body is the PARSED (Zod-validated) warband, not the raw
+// fixture: WarbandSchema defaults each unit's augmentIds to [] (see core's
+// UnitBuildSchema), so the response/row carries that field even though the
+// raw fixture predates it.
+function withDefaultAugmentIds(build: Record<string, unknown>): Record<string, unknown> {
+  const units = (build as { units: Array<Record<string, unknown>> }).units;
+  return { ...build, units: units.map((unit) => ({ ...unit, augmentIds: [] })) };
+}
+
 describe.skipIf(!url)('warband routes', () => {
   let db: Database;
   let pool: Awaited<ReturnType<typeof createDb>>['pool'];
@@ -152,7 +161,7 @@ describe.skipIf(!url)('warband routes', () => {
       data: unknown;
     };
     expect(created.name).toBe('Iron Vanguard');
-    expect(created.data).toEqual(warbandA);
+    expect(created.data).toEqual(withDefaultAugmentIds(warbandA));
 
     const listResponse = await app.inject({
       method: 'GET',
@@ -172,7 +181,7 @@ describe.skipIf(!url)('warband routes', () => {
     expect(getResponse.statusCode).toBe(200);
     expect(getResponse.json()).toEqual(created);
 
-    const updatedBuild = { ...warbandA, name: 'Iron Vanguard II' };
+    const updatedBuild = { ...withDefaultAugmentIds(warbandA), name: 'Iron Vanguard II' };
     // Captured on the same (Node) clock the PUT handler's `new Date()` uses,
     // so this comparison never crosses into Postgres's clock domain (which
     // can visibly skew from the host/container clock and made a
@@ -255,7 +264,7 @@ describe.skipIf(!url)('warband routes', () => {
     expect(aGetAfter.statusCode).toBe(200);
     const aWarbandAfter = aGetAfter.json() as { updatedAt: string; data: unknown };
     expect(aWarbandAfter.updatedAt).toBe(aWarband.updatedAt);
-    expect(aWarbandAfter.data).toEqual(warbandA);
+    expect(aWarbandAfter.data).toEqual(withDefaultAugmentIds(warbandA));
 
     await app.close();
   });
@@ -384,7 +393,7 @@ describe.skipIf(!url)('warband routes', () => {
     });
     const fetched = getResponse.json() as { data: unknown };
 
-    expect(fetched.data).toEqual(warbandA);
+    expect(fetched.data).toEqual(withDefaultAugmentIds(warbandA));
     expect(parseWarband(fetched.data)).toEqual(parseWarband(warbandA));
 
     await app.close();
